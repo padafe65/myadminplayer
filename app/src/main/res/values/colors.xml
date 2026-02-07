@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="byzantium">#6B2D5C</color>
+    <color name="orange">#FFA630</color>
+    <color name="pink_crayola">#FF5376</color>
+    <color name="depp_sky_blue">#3ABEFF</color>
+    <color name="dark_green">#091E05</color>
+    <color name="primavera_verde">#37FF8B</color>
+    <color name="azul_violeta">#3943B7</color>
+    <color name="vino">#6B2737</color>
+
+</resources>
