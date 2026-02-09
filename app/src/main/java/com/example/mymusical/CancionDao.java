@@ -14,17 +14,20 @@ public interface CancionDao {
     @Query("SELECT * FROM canciones")
     List<Cancion> getAll();
 
+    @Query("SELECT * FROM canciones WHERE playlist = :playlistName")
+    List<Cancion> getSongsByPlaylist(String playlistName); // ¡Nuevo!
+
     @Insert
     void insertAll(List<Cancion> canciones);
 
     @Insert
-    void insertSong(Cancion cancion); // Método que faltaba
+    void insertSong(Cancion cancion);
 
     @Update
-    void updateSong(Cancion cancion); // ¡Nuevo!
+    void updateSong(Cancion cancion);
 
     @Delete
-    void deleteSong(Cancion cancion); // ¡Nuevo!
+    void deleteSong(Cancion cancion);
 
     @Query("SELECT COUNT(*) FROM canciones")
     int count();

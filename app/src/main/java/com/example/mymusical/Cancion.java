@@ -21,20 +21,29 @@ public class Cancion {
     @ColumnInfo(name = "video_uri")
     public String videoUri;
 
-    // Constructor vacío (Room lo necesita)
+    // ¡NUEVO! Para la ruta de la miniatura
+    @ColumnInfo(name = "thumbnail_path")
+    public String thumbnailPath;
+
+    // ¡NUEVO! Para la lista de reproducción
+    @ColumnInfo(name = "playlist")
+    public String playlist;
+
+
     public Cancion() {}
 
-    // Constructor para canciones INTERNAS
+    // Constructor para canciones INTERNAS (de fábrica)
     public Cancion(String titulo, int videoResourceId) {
         this.titulo = titulo;
         this.videoResourceId = videoResourceId;
-        this.videoUri = null; // Nos aseguramos de que el otro campo sea nulo
+        this.playlist = "General"; // Asignamos una playlist por defecto
     }
     
-    // Constructor para canciones EXTERNAS
-    public Cancion(String titulo, String videoUri) {
+    // Constructor para canciones EXTERNAS (del usuario)
+    public Cancion(String titulo, String videoUri, String thumbnailPath, String playlist) {
         this.titulo = titulo;
-        this.videoResourceId = null; // Nos aseguramos de que el otro campo sea nulo
         this.videoUri = videoUri;
+        this.thumbnailPath = thumbnailPath;
+        this.playlist = playlist;
     }
 }

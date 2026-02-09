@@ -5,4 +5,8 @@
         android:id="@+id/action_manage_songs"
         android:title="Administrar Videos"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_playlists"
+        android:title="Mis Playlists"
+        app:showAsAction="never" />
 </menu>

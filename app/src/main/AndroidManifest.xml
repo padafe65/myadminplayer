@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permiso para ejecutar servicios en primer plano (reproducción de música) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
@@ -25,12 +24,18 @@
             </intent-filter>
         </activity>
 
-        <!-- Declaración de la nueva pantalla de administración -->
         <activity
             android:name=".ManageSongsActivity"
             android:exported="false" />
 
-        <!-- Declaración del nuevo servicio de reproducción -->
+        <activity
+            android:name=".PlaylistsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PlaylistSongsActivity"
+            android:exported="false" />
+
         <service
             android:name=".PlaybackService"
             android:exported="true"

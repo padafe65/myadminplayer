@@ -1,16 +1,32 @@
 package com.example.mymusical;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.content.Context;
+import android.net.Uri;
 import android.os.Bundle;
-import android.text.InputType;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.Spinner;
 import android.widget.Toast;
 
+import com.bumptech.glide.Glide;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,13 +37,31 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
     private SongsAdapter adapter;
     private List<Cancion> songList = new ArrayList<>();
     private AppDatabase db;
+    private final String[] playlists = {"Vallenato", "Ranchera", "Rock", "Pop", "Popular", "General"};
+
+    private Cancion currentSongForEdit;
+    private ImageView currentDialogThumbnail;
+    private ActivityResultLauncher<String> imagePickerLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_manage_songs);
 
-        // Habilitar el botón de "Atrás" en la barra de acción
+        // Inicializar el launcher para el selector de imágenes
+        imagePickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(),
+                uri -> {
+                    if (uri != null && currentSongForEdit != null && currentDialogThumbnail != null) {
+                        // Copiar la imagen seleccionada al almacenamiento interno y obtener la nueva ruta
+                        String newThumbnailPath = copyImageToInternalStorage(uri);
+                        if(newThumbnailPath != null) {
+                            currentSongForEdit.thumbnailPath = newThumbnailPath;
+                            // Actualizar la vista previa de la imagen en el diálogo
+                            Glide.with(this).load(new File(newThumbnailPath)).into(currentDialogThumbnail);
+                        }
+                    }
+                });
+
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         }
@@ -40,7 +74,7 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
     }
 
     private void setupRecyclerView() {
-        adapter = new SongsAdapter(songList, this);
+        adapter = new SongsAdapter(songList, this, true); // True para mostrar los controles de admin
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(adapter);
     }
@@ -52,22 +86,54 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
             runOnUiThread(() -> adapter.setSongs(songList));
         });
     }
+    
+    @Override
+    public void onSongClick(Cancion cancion) {
+        // En esta pantalla, un clic en la canción no hace nada. 
+    }
 
     @Override
     public void onEditClick(Cancion cancion) {
+        currentSongForEdit = cancion; // Guardamos la canción que se está editando
+
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Editar Título del Video");
+        LayoutInflater inflater = this.getLayoutInflater();
+        View dialogView = inflater.inflate(R.layout.dialog_add_song, null);
+        builder.setView(dialogView);
 
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setText(cancion.titulo);
-        builder.setView(input);
+        final ImageView thumbnailView = dialogView.findViewById(R.id.iv_dialog_thumbnail);
+        currentDialogThumbnail = thumbnailView; // Guardamos la referencia al ImageView del diálogo
 
+        final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
+        final Spinner playlistSpinner = dialogView.findViewById(R.id.spinner_playlist);
+
+        // Hacemos la miniatura clickeable para cambiarla
+        thumbnailView.setOnClickListener(v -> imagePickerLauncher.launch("image/*"));
+
+        if (cancion.thumbnailPath != null && new File(cancion.thumbnailPath).exists()) {
+            Glide.with(this).load(new File(cancion.thumbnailPath)).into(thumbnailView);
+        } else {
+            thumbnailView.setImageResource(R.drawable.music);
+        }
+
+        titleInput.setText(cancion.titulo);
+        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, playlists);
+        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        playlistSpinner.setAdapter(spinnerAdapter);
+        
+        if (cancion.playlist != null) {
+            int currentPlaylistPosition = Arrays.asList(playlists).indexOf(cancion.playlist);
+            playlistSpinner.setSelection(currentPlaylistPosition >= 0 ? currentPlaylistPosition : 0);
+        }
+
+        builder.setTitle("Editar Video");
         builder.setPositiveButton("Guardar", (dialog, which) -> {
-            String newTitle = input.getText().toString();
+            String newTitle = titleInput.getText().toString();
+            String newPlaylist = playlistSpinner.getSelectedItem().toString();
             if (!newTitle.isEmpty()) {
-                cancion.titulo = newTitle;
-                updateSongInDb(cancion);
+                currentSongForEdit.titulo = newTitle;
+                currentSongForEdit.playlist = newPlaylist;
+                updateSongInDb(currentSongForEdit);
             }
         });
         builder.setNegativeButton("Cancelar", (dialog, which) -> dialog.cancel());
@@ -89,7 +155,6 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
             db.cancionDao().updateSong(cancion);
-            // Recargamos la lista para reflejar el cambio
             loadSongs();
             runOnUiThread(() -> Toast.makeText(ManageSongsActivity.this, "Video actualizado", Toast.LENGTH_SHORT).show());
         });
@@ -98,14 +163,42 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
     private void deleteSongFromDb(Cancion cancion) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
+            if (cancion.thumbnailPath != null) {
+                new File(cancion.thumbnailPath).delete();
+            }
             db.cancionDao().deleteSong(cancion);
-            // Recargamos la lista para reflejar el cambio
             loadSongs();
             runOnUiThread(() -> Toast.makeText(ManageSongsActivity.this, "Video eliminado", Toast.LENGTH_SHORT).show());
         });
     }
 
-    // Para que el botón de "Atrás" de la barra funcione
+    private String copyImageToInternalStorage(Uri uri) {
+        try {
+            InputStream inputStream = getContentResolver().openInputStream(uri);
+            if (inputStream == null) return null;
+
+            File internal_storage_path = new File(getFilesDir(), "thumbnails");
+            if (!internal_storage_path.exists()) {
+                internal_storage_path.mkdirs();
+            }
+
+            File file = new File(internal_storage_path, System.currentTimeMillis() + ".jpg");
+
+            try (OutputStream outputStream = new FileOutputStream(file)) {
+                byte[] buf = new byte[1024];
+                int len;
+                while ((len = inputStream.read(buf)) > 0) {
+                    outputStream.write(buf, 0, len);
+                }
+            }
+            inputStream.close();
+            return file.getAbsolutePath();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
     @Override
     public boolean onSupportNavigateUp() {
         onBackPressed();

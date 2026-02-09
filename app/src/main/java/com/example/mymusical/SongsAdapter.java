@@ -4,26 +4,31 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+import com.bumptech.glide.Glide;
 
+import java.io.File;
 import java.util.List;
 
 public class SongsAdapter extends RecyclerView.Adapter<SongsAdapter.SongViewHolder> {
 
     private List<Cancion> songList;
     private final OnSongListener listener;
+    private final boolean showAdminControls;
 
-    // Interfaz para comunicar los clics a la Activity
     public interface OnSongListener {
+        void onSongClick(Cancion cancion);
         void onEditClick(Cancion cancion);
         void onDeleteClick(Cancion cancion);
     }
 
-    public SongsAdapter(List<Cancion> songList, OnSongListener listener) {
+    public SongsAdapter(List<Cancion> songList, OnSongListener listener, boolean showAdminControls) {
         this.songList = songList;
         this.listener = listener;
+        this.showAdminControls = showAdminControls;
     }
 
     @NonNull
@@ -37,10 +42,27 @@ public class SongsAdapter extends RecyclerView.Adapter<SongsAdapter.SongViewHold
     public void onBindViewHolder(@NonNull SongViewHolder holder, int position) {
         Cancion currentSong = songList.get(position);
         holder.title.setText(currentSong.titulo);
+        holder.playlist.setText("Playlist: " + currentSong.playlist);
 
-        // Asignamos los listeners a los botones
-        holder.editButton.setOnClickListener(v -> listener.onEditClick(currentSong));
-        holder.deleteButton.setOnClickListener(v -> listener.onDeleteClick(currentSong));
+        if (currentSong.thumbnailPath != null && new File(currentSong.thumbnailPath).exists()) {
+            Glide.with(holder.itemView.getContext())
+                    .load(new File(currentSong.thumbnailPath))
+                    .into(holder.thumbnail);
+        } else {
+            holder.thumbnail.setImageResource(R.drawable.music);
+        }
+
+        if (showAdminControls) {
+            holder.editButton.setVisibility(View.VISIBLE);
+            holder.deleteButton.setVisibility(View.VISIBLE);
+            holder.editButton.setOnClickListener(v -> listener.onEditClick(currentSong));
+            holder.deleteButton.setOnClickListener(v -> listener.onDeleteClick(currentSong));
+            holder.itemView.setOnClickListener(null); // No hacer nada en el clic normal
+        } else {
+            holder.editButton.setVisibility(View.GONE);
+            holder.deleteButton.setVisibility(View.GONE);
+            holder.itemView.setOnClickListener(v -> listener.onSongClick(currentSong));
+        }
     }
 
     @Override
@@ -48,20 +70,21 @@ public class SongsAdapter extends RecyclerView.Adapter<SongsAdapter.SongViewHold
         return songList.size();
     }
 
-    // Método para actualizar la lista de canciones desde la Activity
     public void setSongs(List<Cancion> songs) {
         this.songList = songs;
         notifyDataSetChanged();
     }
 
-    // ViewHolder que representa cada fila
     public static class SongViewHolder extends RecyclerView.ViewHolder {
-        TextView title;
+        ImageView thumbnail;
+        TextView title, playlist;
         ImageButton editButton, deleteButton;
 
         public SongViewHolder(@NonNull View itemView) {
             super(itemView);
+            thumbnail = itemView.findViewById(R.id.iv_thumbnail);
             title = itemView.findViewById(R.id.tv_song_title);
+            playlist = itemView.findViewById(R.id.tv_playlist_name);
             editButton = itemView.findViewById(R.id.btn_edit_song);
             deleteButton = itemView.findViewById(R.id.btn_delete_song);
         }
