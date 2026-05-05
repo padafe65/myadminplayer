@@ -1,4 +1,4 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -7,15 +7,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.Spinner;
 import android.widget.Toast;
 
 import com.bumptech.glide.Glide;
@@ -26,7 +23,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -37,7 +33,6 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
     private SongsAdapter adapter;
     private List<Cancion> songList = new ArrayList<>();
     private AppDatabase db;
-    private final String[] playlists = {"Vallenato", "Ranchera", "Rock", "Pop", "Popular", "General"};
 
     private Cancion currentSongForEdit;
     private ImageView currentDialogThumbnail;
@@ -105,7 +100,7 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
         currentDialogThumbnail = thumbnailView; // Guardamos la referencia al ImageView del diálogo
 
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
-        final Spinner playlistSpinner = dialogView.findViewById(R.id.spinner_playlist);
+        final EditText playlistInput = dialogView.findViewById(R.id.et_playlist_name);
 
         // Hacemos la miniatura clickeable para cambiarla
         thumbnailView.setOnClickListener(v -> imagePickerLauncher.launch("image/*"));
@@ -117,19 +112,17 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
         }
 
         titleInput.setText(cancion.titulo);
-        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, playlists);
-        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        playlistSpinner.setAdapter(spinnerAdapter);
+        playlistInput.setText(cancion.playlist);
         
-        if (cancion.playlist != null) {
-            int currentPlaylistPosition = Arrays.asList(playlists).indexOf(cancion.playlist);
-            playlistSpinner.setSelection(currentPlaylistPosition >= 0 ? currentPlaylistPosition : 0);
-        }
-
         builder.setTitle("Editar Video");
         builder.setPositiveButton("Guardar", (dialog, which) -> {
             String newTitle = titleInput.getText().toString();
-            String newPlaylist = playlistSpinner.getSelectedItem().toString();
+            String newPlaylist = playlistInput.getText().toString();
+
+            if (newPlaylist.isEmpty()) {
+                newPlaylist = "General";
+            }
+
             if (!newTitle.isEmpty()) {
                 currentSongForEdit.titulo = newTitle;
                 currentSongForEdit.playlist = newPlaylist;

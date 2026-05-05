@@ -1,5 +1,6 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
+import android.net.Uri;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,15 +20,21 @@ public class PlaylistsAdapter extends RecyclerView.Adapter<PlaylistsAdapter.Play
 
     private final List<Map.Entry<String, List<Cancion>>> playlistGroups;
     private final OnPlaylistClickListener listener;
+    private final OnPlaylistLongClickListener longClickListener;
 
     // Interfaz para comunicar los clics a la Activity
     public interface OnPlaylistClickListener {
         void onPlaylistClick(String playlistName);
     }
 
-    public PlaylistsAdapter(List<Map.Entry<String, List<Cancion>>> playlistGroups, OnPlaylistClickListener listener) {
+    public interface OnPlaylistLongClickListener {
+        void onPlaylistLongClick(String playlistName);
+    }
+
+    public PlaylistsAdapter(List<Map.Entry<String, List<Cancion>>> playlistGroups, OnPlaylistClickListener listener, OnPlaylistLongClickListener longClickListener) {
         this.playlistGroups = playlistGroups;
         this.listener = listener;
+        this.longClickListener = longClickListener;
     }
 
     @NonNull
@@ -47,12 +54,22 @@ public class PlaylistsAdapter extends RecyclerView.Adapter<PlaylistsAdapter.Play
         holder.playlistName.setText(playlistName);
         holder.songCount.setText(songCount + " Videos");
 
-        if (!songsInPlaylist.isEmpty() && songsInPlaylist.get(0).thumbnailPath != null) {
-            File thumbnailFile = new File(songsInPlaylist.get(0).thumbnailPath);
-            if (thumbnailFile.exists()) {
+        // Mostrar la imagen de la playlist si existe, si no, la del primer video, si no, una por defecto
+        if (!songsInPlaylist.isEmpty()) {
+            String playlistImageUri = songsInPlaylist.get(0).playlistImageUri;
+            if (playlistImageUri != null) {
                 Glide.with(holder.itemView.getContext())
-                        .load(thumbnailFile)
+                        .load(Uri.parse(playlistImageUri))
                         .into(holder.thumbnail);
+            } else if (songsInPlaylist.get(0).thumbnailPath != null) {
+                File thumbnailFile = new File(songsInPlaylist.get(0).thumbnailPath);
+                if (thumbnailFile.exists()) {
+                    Glide.with(holder.itemView.getContext())
+                            .load(thumbnailFile)
+                            .into(holder.thumbnail);
+                }
+            } else {
+                holder.thumbnail.setImageResource(R.drawable.music);
             }
         } else {
             holder.thumbnail.setImageResource(R.drawable.music);
@@ -60,6 +77,13 @@ public class PlaylistsAdapter extends RecyclerView.Adapter<PlaylistsAdapter.Play
 
         // Hacemos que toda la tarjeta sea clickeable
         holder.itemView.setOnClickListener(v -> listener.onPlaylistClick(playlistName));
+        holder.itemView.setOnLongClickListener(v -> {
+            if (longClickListener != null) {
+                longClickListener.onPlaylistLongClick(playlistName);
+                return true;
+            }
+            return false;
+        });
     }
 
     @Override

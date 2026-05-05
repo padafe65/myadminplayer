@@ -1,11 +1,11 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
 import android.content.Context;
 import androidx.room.Database;
 import androidx.room.Room;
 import androidx.room.RoomDatabase;
 
-@Database(entities = {Cancion.class}, version = 3) // ¡Aumentamos la versión a 3!
+@Database(entities = {Cancion.class}, version = 4) // ¡Aumentamos la versión a 4!
 public abstract class AppDatabase extends RoomDatabase {
 
     public abstract CancionDao cancionDao();

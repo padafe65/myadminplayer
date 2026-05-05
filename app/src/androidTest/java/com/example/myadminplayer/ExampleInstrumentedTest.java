@@ -1,4 +1,4 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
 import android.content.Context;
 

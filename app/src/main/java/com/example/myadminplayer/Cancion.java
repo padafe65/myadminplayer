@@ -1,7 +1,8 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
 import androidx.room.ColumnInfo;
 import androidx.room.Entity;
+import androidx.room.Ignore;
 import androidx.room.PrimaryKey;
 
 @Entity(tableName = "canciones")
@@ -29,10 +30,15 @@ public class Cancion {
     @ColumnInfo(name = "playlist")
     public String playlist;
 
+    // ¡NUEVO! Para la imagen de la lista de reproducción
+    @ColumnInfo(name = "playlist_image_uri")
+    public String playlistImageUri;
+
 
     public Cancion() {}
 
     // Constructor para canciones INTERNAS (de fábrica)
+    @Ignore
     public Cancion(String titulo, int videoResourceId) {
         this.titulo = titulo;
         this.videoResourceId = videoResourceId;

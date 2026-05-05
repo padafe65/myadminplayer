@@ -13,6 +13,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MyMusical"
+rootProject.name = "MyAdminPlayer"
 include(":app")
  

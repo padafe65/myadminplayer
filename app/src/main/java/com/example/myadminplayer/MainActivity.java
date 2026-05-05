@@ -1,4 +1,4 @@
-package com.example.mymusical;
+package com.example.myadminplayer;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -11,6 +11,8 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
@@ -21,15 +23,16 @@ import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.LayoutInflater;
 import android.view.Menu;
-import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
@@ -42,7 +45,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.airbnb.lottie.LottieAnimationView;
@@ -58,6 +61,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.google.android.gms.cast.framework.CastButtonFactory;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -73,9 +77,11 @@ public class MainActivity extends AppCompatActivity {
     TextInputLayout menu_canciones;
     FrameLayout videoContainer;
     ImageView videoBackground;
+    TextView userWelcomeText;
 
     private List<Cancion> currentPlaylist = new ArrayList<>();
     private AppDatabase db;
+    private SharedPreferences sharedPreferences;
 
     private final ActivityResultLauncher<Intent> openFileLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -83,7 +89,13 @@ public class MainActivity extends AppCompatActivity {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                     Uri uri = result.getData().getData();
                     if (uri != null) {
-                        getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        try {
+                            // Otorgar permiso persistente para que el servidor pueda leer el archivo luego
+                            getContentResolver().takePersistableUriPermission(uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        } catch (SecurityException e) {
+                            e.printStackTrace();
+                        }
                         showAddSongDialog(uri);
                     }
                 }
@@ -99,6 +111,51 @@ public class MainActivity extends AppCompatActivity {
 
         initializeViews();
         db = AppDatabase.getDatabase(getApplicationContext());
+        sharedPreferences = getSharedPreferences("MyMusicalPrefs", MODE_PRIVATE);
+
+        updateWelcomeMessage();
+        checkFirstRun();
+    }
+
+    private void checkFirstRun() {
+        boolean isFirstRun = sharedPreferences.getBoolean("isFirstRun", true);
+        if (isFirstRun) {
+            showUserNameDialog();
+        }
+    }
+
+    private void showUserNameDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Bienvenido a MyMusical");
+
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint("Ingresa tu nombre");
+        builder.setView(input);
+
+        builder.setPositiveButton("Guardar", (dialog, which) -> {
+            String userName = input.getText().toString();
+            if (!userName.isEmpty()) {
+                sharedPreferences.edit()
+                        .putBoolean("isFirstRun", false)
+                        .putString("userName", userName)
+                        .apply();
+                Toast.makeText(this, "¡Hola, " + userName + "!", Toast.LENGTH_SHORT).show();
+                updateWelcomeMessage();
+            }
+        });
+        builder.setCancelable(false);
+        builder.show();
+    }
+
+    private void updateWelcomeMessage() {
+        String userName = sharedPreferences.getString("userName", "");
+        if (!userName.isEmpty()) {
+            userWelcomeText.setText("Hola, " + userName);
+        }
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setTitle("MyAdminPlayer");
+        }
     }
 
     @Override
@@ -138,8 +195,9 @@ public class MainActivity extends AppCompatActivity {
         menu_canciones = findViewById(R.id.menu_canciones);
         videoContainer = findViewById(R.id.videoContainer);
         videoBackground = findViewById(R.id.videoBackground);
+        userWelcomeText = findViewById(R.id.user_welcome_text);
 
-        playerView.setVisibility(View.INVISIBLE);
+        playerView.setVisibility(View.VISIBLE);
         fabAddSong.setOnClickListener(v -> openFilePicker());
 
         autoCompleteTextView.setOnTouchListener((v, event) -> {
@@ -229,15 +287,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void playNewSongFromSelection(String selection) {
-        if (findPositionByTitle(selection, this.currentPlaylist) == -1) {
-            loadAndSetPlaylist(null, selection, true);
+        int pos = findPositionByTitle(selection, this.currentPlaylist);
+        if (pos != -1) {
+            mediaController.seekTo(pos, 0);
+            mediaController.play();
         } else {
-            int pos = findPositionByTitle(selection, this.currentPlaylist);
-            if (pos != -1) {
-                mediaController.seekToDefaultPosition(pos);
-                mediaController.play();
-            }
+            // Si no está en la lista actual, recargamos todo
+            loadAndSetPlaylist(null, selection, true);
         }
+
         InputMethodManager in = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
         if (in != null) {
             in.hideSoftInputFromWindow(autoCompleteTextView.getWindowToken(), 0);
@@ -254,7 +312,16 @@ public class MainActivity extends AppCompatActivity {
                 List<MediaItem> mediaItems = new ArrayList<>();
                 if (!currentPlaylist.isEmpty()) {
                     for (Cancion cancion : currentPlaylist) {
-                        mediaItems.add(MediaItem.fromUri(getUriForSong(cancion)));
+                        MediaMetadata metadata = new MediaMetadata.Builder()
+                                .setTitle(cancion.titulo)
+                                .setArtist("MyAdminPlayer")
+                                .build();
+
+                        mediaItems.add(new MediaItem.Builder()
+                                .setUri(getUriForSong(cancion))
+                                .setMimeType(MimeTypes.VIDEO_MP4)
+                                .setMediaMetadata(metadata)
+                                .build());
                     }
                 }
 
@@ -303,23 +370,23 @@ public class MainActivity extends AppCompatActivity {
         builder.setView(dialogView);
 
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
-        final Spinner playlistSpinner = dialogView.findViewById(R.id.spinner_playlist);
-
-        String[] playlists = {"Vallenato", "Ranchera", "Rock", "Pop", "Popular"};
-        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, playlists);
-        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        playlistSpinner.setAdapter(spinnerAdapter);
+        final EditText playlistInput = dialogView.findViewById(R.id.et_playlist_name);
 
         builder.setTitle("Añadir Video");
         builder.setPositiveButton("Guardar", (dialog, which) -> {
             String title = titleInput.getText().toString();
-            String selectedPlaylist = playlistSpinner.getSelectedItem().toString();
+            String playlistName = playlistInput.getText().toString();
+
+            if (playlistName.isEmpty()) {
+                playlistName = "General";
+            }
 
             if (!title.isEmpty()) {
+                String finalPlaylistName = playlistName;
                 ExecutorService executor = Executors.newSingleThreadExecutor();
                 executor.execute(() -> {
                     String thumbnailPath = generateThumbnail(this, uri);
-                    saveNewSong(title, uri.toString(), thumbnailPath, selectedPlaylist);
+                    saveNewSong(title, uri.toString(), thumbnailPath, finalPlaylistName);
                 });
             }
         });
@@ -369,7 +436,16 @@ public class MainActivity extends AppCompatActivity {
             loadSongsFromDatabase(null, songs -> {
                 this.currentPlaylist = songs;
                 updateAutoCompleteAdapter(songs);
-                mediaController.addMediaItem(MediaItem.fromUri(getUriForSong(newSong)));
+                MediaMetadata metadata = new MediaMetadata.Builder()
+                        .setTitle(newSong.titulo)
+                        .setArtist("MyAdminPlayer")
+                        .build();
+
+                mediaController.addMediaItem(new MediaItem.Builder()
+                        .setUri(getUriForSong(newSong))
+                        .setMimeType(MimeTypes.VIDEO_MP4)
+                        .setMediaMetadata(metadata)
+                        .build());
             });
         });
     }
@@ -421,6 +497,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
+        // Vincula el botón del XML con el sistema de búsqueda de dispositivos (Smart TV/Chromecast)
+        CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), menu, R.id.media_route_menu_item);
         return true;
     }
 
