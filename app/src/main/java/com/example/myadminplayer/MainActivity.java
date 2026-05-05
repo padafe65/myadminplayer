@@ -370,7 +370,25 @@ public class MainActivity extends AppCompatActivity {
         builder.setView(dialogView);
 
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
-        final EditText playlistInput = dialogView.findViewById(R.id.et_playlist_name);
+        final AutoCompleteTextView playlistInput = dialogView.findViewById(R.id.et_playlist_name);
+
+        // Cargar géneros existentes de la base de datos
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            List<String> playlists = db.cancionDao().getAllPlaylists();
+            runOnUiThread(() -> {
+                if (playlists != null && !playlists.isEmpty()) {
+                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                            android.R.layout.simple_dropdown_item_1line, playlists);
+                    playlistInput.setAdapter(adapter);
+                    // Mostrar sugerencias al tocar el campo
+                    playlistInput.setOnClickListener(v -> playlistInput.showDropDown());
+                    playlistInput.setOnFocusChangeListener((v, hasFocus) -> {
+                        if (hasFocus) playlistInput.showDropDown();
+                    });
+                }
+            });
+        });
 
         builder.setTitle("Añadir Video");
         builder.setPositiveButton("Guardar", (dialog, which) -> {
@@ -383,7 +401,6 @@ public class MainActivity extends AppCompatActivity {
 
             if (!title.isEmpty()) {
                 String finalPlaylistName = playlistName;
-                ExecutorService executor = Executors.newSingleThreadExecutor();
                 executor.execute(() -> {
                     String thumbnailPath = generateThumbnail(this, uri);
                     saveNewSong(title, uri.toString(), thumbnailPath, finalPlaylistName);
