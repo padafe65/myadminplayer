@@ -11,6 +11,10 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.EditText;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
@@ -104,17 +108,34 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
 
     private void showAddPlaylistDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LayoutInflater inflater = this.getLayoutInflater();
+        View dialogView = inflater.inflate(R.layout.dialog_add_playlist, null);
+        builder.setView(dialogView);
+
+        final AutoCompleteTextView input = dialogView.findViewById(R.id.et_playlist_name);
+
+        // Cargar géneros existentes
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            List<String> playlists = db.cancionDao().getAllPlaylists();
+            runOnUiThread(() -> {
+                if (playlists != null && !playlists.isEmpty()) {
+                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                            android.R.layout.simple_dropdown_item_1line, playlists);
+                    input.setAdapter(adapter);
+                    
+                    input.setOnClickListener(v -> input.showDropDown());
+                    input.setOnFocusChangeListener((v, hasFocus) -> {
+                        if (hasFocus) input.showDropDown();
+                    });
+                }
+            });
+        });
+
         builder.setTitle("Crear Nueva Playlist");
-
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setHint("Nombre de la playlist");
-        builder.setView(input);
-
         builder.setPositiveButton("Crear", (dialog, which) -> {
             String playlistName = input.getText().toString().trim();
             if (!playlistName.isEmpty()) {
-                ExecutorService executor = Executors.newSingleThreadExecutor();
                 executor.execute(() -> {
                     // Insert a dummy song to create the playlist
                     Cancion dummySong = new Cancion();

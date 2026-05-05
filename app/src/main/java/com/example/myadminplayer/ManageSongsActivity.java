@@ -11,6 +11,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.Toast;
@@ -100,7 +102,26 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
         currentDialogThumbnail = thumbnailView; // Guardamos la referencia al ImageView del diálogo
 
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
-        final EditText playlistInput = dialogView.findViewById(R.id.et_playlist_name);
+        final AutoCompleteTextView playlistInput = dialogView.findViewById(R.id.et_playlist_name);
+
+        // Cargar géneros existentes de la base de datos
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            List<String> playlists = db.cancionDao().getAllPlaylists();
+            runOnUiThread(() -> {
+                if (playlists != null && !playlists.isEmpty()) {
+                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                            android.R.layout.simple_dropdown_item_1line, playlists);
+                    playlistInput.setAdapter(adapter);
+                    
+                    // Mostrar sugerencias al tocar el campo
+                    playlistInput.setOnClickListener(v -> playlistInput.showDropDown());
+                    playlistInput.setOnFocusChangeListener((v, hasFocus) -> {
+                        if (hasFocus) playlistInput.showDropDown();
+                    });
+                }
+            });
+        });
 
         // Hacemos la miniatura clickeable para cambiarla
         thumbnailView.setOnClickListener(v -> imagePickerLauncher.launch("image/*"));
