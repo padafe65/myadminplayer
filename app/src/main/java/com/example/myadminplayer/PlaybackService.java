@@ -125,18 +125,20 @@ public class PlaybackService extends MediaSessionService {
         Player previousPlayer = mediaSession.getPlayer();
         Log.d(TAG, "Cambiando reproductor de " + previousPlayer.getClass().getSimpleName() + " a " + newPlayer.getClass().getSimpleName());
 
-        // Antes de limpiar nada, guardamos la lista actual en la maestra si venimos del ExoPlayer
-        if (previousPlayer instanceof ExoPlayer) {
+        // Transferir estado
+        int windowIndex = previousPlayer.getCurrentMediaItemIndex();
+        long contentPositionMs = previousPlayer.getContentPosition();
+        boolean playWhenReady = previousPlayer.getPlayWhenReady();
+
+        // Actualizamos la lista maestra SIEMPRE que haya items en el reproductor actual
+        // Esto permite que el buscador (+) o nuevas listas se sincronicen al proyectar
+        if (previousPlayer.getMediaItemCount() > 0) {
             masterPlaylist.clear();
             for (int i = 0; i < previousPlayer.getMediaItemCount(); i++) {
                 masterPlaylist.add(previousPlayer.getMediaItemAt(i));
             }
-            Log.d(TAG, "Lista maestra actualizada con " + masterPlaylist.size() + " videos originales");
+            Log.d(TAG, "Lista maestra actualizada con " + masterPlaylist.size() + " videos");
         }
-
-        int windowIndex = previousPlayer.getCurrentMediaItemIndex();
-        long contentPositionMs = previousPlayer.getContentPosition();
-        boolean playWhenReady = previousPlayer.getPlayWhenReady();
 
         List<MediaItem> mediaItemsToSet = new ArrayList<>();
         String ipAddress = getWifiIPAddress();
