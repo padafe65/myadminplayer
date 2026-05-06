@@ -415,7 +415,11 @@ public class MainActivity extends AppCompatActivity {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(context, videoUri);
+            // Intentar obtener un frame cerca del segundo 1, si falla, el primero disponible
             Bitmap bitmap = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            if (bitmap == null) {
+                bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            }
 
             if (bitmap != null) {
                 File internal_storage_path = new File(context.getFilesDir(), "thumbnails");

@@ -129,7 +129,19 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
         if (cancion.thumbnailPath != null && new File(cancion.thumbnailPath).exists()) {
             Glide.with(this).load(new File(cancion.thumbnailPath)).into(thumbnailView);
         } else {
-            thumbnailView.setImageResource(R.drawable.music);
+            // Si no hay miniatura, intentar cargar un frame en el diálogo
+            Uri videoUri = null;
+            if (cancion.videoUri != null) {
+                videoUri = Uri.parse(cancion.videoUri);
+            } else if (cancion.videoResourceId != null) {
+                videoUri = Uri.parse("android.resource://" + getPackageName() + "/" + cancion.videoResourceId);
+            }
+            
+            if (videoUri != null) {
+                Glide.with(this).asBitmap().load(videoUri).placeholder(R.drawable.music).into(thumbnailView);
+            } else {
+                thumbnailView.setImageResource(R.drawable.music);
+            }
         }
 
         titleInput.setText(cancion.titulo);

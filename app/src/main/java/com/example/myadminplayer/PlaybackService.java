@@ -110,6 +110,45 @@ public class PlaybackService extends MediaSessionService {
                     public ListenableFuture<MediaSession.MediaItemsWithStartPosition> onPlaybackResumption(@NonNull MediaSession mediaSession, @NonNull MediaSession.ControllerInfo controller) {
                         return MediaSession.Callback.super.onPlaybackResumption(mediaSession, controller);
                     }
+
+                    @NonNull
+                    @Override
+                    public ListenableFuture<List<MediaItem>> onAddMediaItems(@NonNull MediaSession mediaSession, @NonNull MediaSession.ControllerInfo controller, @NonNull List<MediaItem> mediaItems) {
+                        Log.d(TAG, "onAddMediaItems: Interceptando para proyectar si es necesario");
+                        List<MediaItem> updatedItems = new ArrayList<>();
+                        String ipAddress = getWifiIPAddress();
+                        
+                        for (MediaItem item : mediaItems) {
+                            MediaItem newItem = item;
+                            // Si estamos en CastPlayer, convertimos los nuevos items a URLs del servidor
+                            if (mediaSession.getPlayer() instanceof CastPlayer && ipAddress != null && item.localConfiguration != null) {
+                                Uri uri = item.localConfiguration.uri;
+                                if ("content".equals(uri.getScheme()) || "file".equals(uri.getScheme())) {
+                                    // Agregamos a la lista maestra para que el servidor lo encuentre
+                                    int index;
+                                    synchronized (masterPlaylist) {
+                                        masterPlaylist.add(item);
+                                        index = masterPlaylist.size() - 1;
+                                    }
+                                    
+                                    String serverUrl = "http://" + ipAddress + ":" + SERVER_PORT + "/?index=" + index + "&t=" + System.currentTimeMillis();
+                                    Log.d(TAG, "Nuevo item " + index + " -> URL: " + serverUrl);
+                                    
+                                    newItem = item.buildUpon()
+                                            .setUri(Uri.parse(serverUrl))
+                                            .setMimeType("video/mp4")
+                                            .build();
+                                }
+                            } else if (mediaSession.getPlayer() instanceof ExoPlayer) {
+                                // Si estamos en el celular, simplemente guardamos en la maestra
+                                synchronized (masterPlaylist) {
+                                    masterPlaylist.add(item);
+                                }
+                            }
+                            updatedItems.add(newItem);
+                        }
+                        return com.google.common.util.concurrent.Futures.immediateFuture(updatedItems);
+                    }
                 })
                 .build();
 

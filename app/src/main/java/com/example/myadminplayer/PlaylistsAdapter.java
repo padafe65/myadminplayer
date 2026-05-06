@@ -54,22 +54,55 @@ public class PlaylistsAdapter extends RecyclerView.Adapter<PlaylistsAdapter.Play
         holder.playlistName.setText(playlistName);
         holder.songCount.setText(songCount + " Videos");
 
-        // Mostrar la imagen de la playlist si existe, si no, la del primer video, si no, una por defecto
+        // Mostrar la imagen de la playlist si existe, si no, buscamos la primera miniatura disponible
         if (!songsInPlaylist.isEmpty()) {
-            String playlistImageUri = songsInPlaylist.get(0).playlistImageUri;
-            if (playlistImageUri != null) {
-                Glide.with(holder.itemView.getContext())
-                        .load(Uri.parse(playlistImageUri))
-                        .into(holder.thumbnail);
-            } else if (songsInPlaylist.get(0).thumbnailPath != null) {
-                File thumbnailFile = new File(songsInPlaylist.get(0).thumbnailPath);
-                if (thumbnailFile.exists()) {
+            boolean imageLoaded = false;
+            
+            // 1. Intentar cargar la imagen personalizada de la playlist (si existe en algún video del grupo)
+            for (Cancion s : songsInPlaylist) {
+                if (s.playlistImageUri != null) {
                     Glide.with(holder.itemView.getContext())
-                            .load(thumbnailFile)
+                            .load(Uri.parse(s.playlistImageUri))
+                            .placeholder(R.drawable.music)
                             .into(holder.thumbnail);
+                    imageLoaded = true;
+                    break;
                 }
-            } else {
-                holder.thumbnail.setImageResource(R.drawable.music);
+            }
+
+            // 2. Si no hay imagen de playlist, buscar el primer video que tenga una miniatura generada
+            if (!imageLoaded) {
+                for (Cancion s : songsInPlaylist) {
+                    if (s.thumbnailPath != null && new File(s.thumbnailPath).exists()) {
+                        Glide.with(holder.itemView.getContext())
+                                .load(new File(s.thumbnailPath))
+                                .placeholder(R.drawable.music)
+                                .into(holder.thumbnail);
+                        imageLoaded = true;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Si aún no cargamos nada, intentamos sacar un frame del primer video real
+            if (!imageLoaded) {
+                Cancion firstSong = songsInPlaylist.get(0);
+                Uri videoUri = null;
+                if (firstSong.videoUri != null) {
+                    videoUri = Uri.parse(firstSong.videoUri);
+                } else if (firstSong.videoResourceId != null) {
+                    videoUri = Uri.parse("android.resource://" + holder.itemView.getContext().getPackageName() + "/" + firstSong.videoResourceId);
+                }
+
+                if (videoUri != null) {
+                    Glide.with(holder.itemView.getContext())
+                            .asBitmap()
+                            .load(videoUri)
+                            .placeholder(R.drawable.music)
+                            .into(holder.thumbnail);
+                } else {
+                    holder.thumbnail.setImageResource(R.drawable.music);
+                }
             }
         } else {
             holder.thumbnail.setImageResource(R.drawable.music);

@@ -49,7 +49,24 @@ public class SongsAdapter extends RecyclerView.Adapter<SongsAdapter.SongViewHold
                     .load(new File(currentSong.thumbnailPath))
                     .into(holder.thumbnail);
         } else {
-            holder.thumbnail.setImageResource(R.drawable.music);
+            // Si no hay miniatura guardada, intentamos cargar un frame del video usando Glide
+            android.net.Uri videoUri = null;
+            if (currentSong.videoUri != null) {
+                videoUri = android.net.Uri.parse(currentSong.videoUri);
+            } else if (currentSong.videoResourceId != null) {
+                videoUri = android.net.Uri.parse("android.resource://" + holder.itemView.getContext().getPackageName() + "/" + currentSong.videoResourceId);
+            }
+
+            if (videoUri != null) {
+                Glide.with(holder.itemView.getContext())
+                        .asBitmap()
+                        .load(videoUri)
+                        .placeholder(R.drawable.music)
+                        .error(R.drawable.music)
+                        .into(holder.thumbnail);
+            } else {
+                holder.thumbnail.setImageResource(R.drawable.music);
+            }
         }
 
         if (showAdminControls) {
