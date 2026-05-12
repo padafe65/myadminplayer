@@ -4,6 +4,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -16,6 +17,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.EditText;
+import android.util.Log;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
@@ -25,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
 
 public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAdapter.OnPlaylistClickListener, PlaylistsAdapter.OnPlaylistLongClickListener {
 
@@ -40,7 +41,6 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                     Uri uri = result.getData().getData();
                     if (uri != null) {
-                        // Persist permission to read the URI
                         getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                         ExecutorService executor = Executors.newSingleThreadExecutor();
                         executor.execute(() -> {
@@ -56,18 +56,23 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_playlists);
 
+        Toolbar toolbar = findViewById(R.id.toolbar_playlists);
+        setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            getSupportActionBar().setTitle("Mis Playlists");
         }
 
         recyclerView = findViewById(R.id.rv_playlists);
-        FloatingActionButton fabAddPlaylist = findViewById(R.id.fab_add_playlist);
         db = AppDatabase.getDatabase(getApplicationContext());
 
         setupRecyclerView();
         loadPlaylists();
 
-        fabAddPlaylist.setOnClickListener(v -> showAddPlaylistDialog());
+        FloatingActionButton fabAddPlaylist = findViewById(R.id.fab_add_playlist);
+        if (fabAddPlaylist != null) {
+            fabAddPlaylist.setOnClickListener(v -> showAddPlaylistDialog());
+        }
     }
 
     private void setupRecyclerView() {
@@ -77,25 +82,37 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
     private void loadPlaylists() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
-            List<Cancion> allSongs = db.cancionDao().getAll();
-            List<String> allPlaylists = db.cancionDao().getAllPlaylists();
+            try {
+                List<Cancion> allSongs = db.cancionDao().getAll();
+                List<String> allPlaylists = db.cancionDao().getAllPlaylists();
 
-            Map<String, List<Cancion>> playlistMap = allSongs.stream()
-                    .filter(c -> c.playlist != null && !c.playlist.isEmpty() && c.titulo != null && !c.titulo.isEmpty())
-                    .collect(Collectors.groupingBy(c -> c.playlist, 
-                                                    HashMap::new, 
-                                                    Collectors.toCollection(ArrayList::new)));
+                Map<String, List<Cancion>> playlistMap = new HashMap<>();
+                if (allPlaylists != null) {
+                    for (String name : allPlaylists) {
+                        playlistMap.put(name, new ArrayList<>());
+                    }
+                }
 
-            for (String playlistName : allPlaylists) {
-                playlistMap.putIfAbsent(playlistName, new ArrayList<>());
+                if (allSongs != null) {
+                    for (Cancion c : allSongs) {
+                        if (c.playlist != null && !c.playlist.isEmpty() && c.titulo != null && !c.titulo.isEmpty()) {
+                            List<Cancion> list = playlistMap.get(c.playlist);
+                            if (list != null) {
+                                list.add(c);
+                            }
+                        }
+                    }
+                }
+
+                List<Map.Entry<String, List<Cancion>>> playlistGroups = new ArrayList<>(playlistMap.entrySet());
+
+                runOnUiThread(() -> {
+                    adapter = new PlaylistsAdapter(playlistGroups, this, this);
+                    recyclerView.setAdapter(adapter);
+                });
+            } catch (Exception e) {
+                Log.e("PlaylistsActivity", "Error al cargar playlists", e);
             }
-
-            List<Map.Entry<String, List<Cancion>>> playlistGroups = new ArrayList<>(playlistMap.entrySet());
-
-            runOnUiThread(() -> {
-                adapter = new PlaylistsAdapter(playlistGroups, this, this);
-                recyclerView.setAdapter(adapter);
-            });
         });
     }
 
@@ -114,7 +131,6 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
 
         final AutoCompleteTextView input = dialogView.findViewById(R.id.et_playlist_name);
 
-        // Cargar géneros existentes
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
             List<String> playlists = db.cancionDao().getAllPlaylists();
@@ -123,31 +139,25 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
                     ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
                             android.R.layout.simple_dropdown_item_1line, playlists);
                     input.setAdapter(adapter);
-                    
-                    input.setOnClickListener(v -> input.showDropDown());
-                    input.setOnFocusChangeListener((v, hasFocus) -> {
-                        if (hasFocus) input.showDropDown();
-                    });
                 }
             });
         });
 
-        builder.setTitle("Crear Nueva Playlist");
-        builder.setPositiveButton("Crear", (dialog, which) -> {
-            String playlistName = input.getText().toString().trim();
-            if (!playlistName.isEmpty()) {
-                executor.execute(() -> {
-                    // Insert a dummy song to create the playlist
-                    Cancion dummySong = new Cancion();
-                    dummySong.playlist = playlistName;
-                    dummySong.titulo = ""; //Empty title for dummy song
-                    db.cancionDao().insertSong(dummySong);
-                    runOnUiThread(this::loadPlaylists);
-                });
-            }
-        });
-        builder.setNegativeButton("Cancelar", (dialog, which) -> dialog.cancel());
-        builder.show();
+        builder.setTitle("Nueva Playlist")
+                .setPositiveButton("Crear", (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (!name.isEmpty()) {
+                        executor.execute(() -> {
+                            Cancion dummy = new Cancion();
+                            dummy.playlist = name;
+                            dummy.titulo = "";
+                            db.cancionDao().insertSong(dummy);
+                            runOnUiThread(this::loadPlaylists);
+                        });
+                    }
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     @Override
@@ -159,20 +169,13 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
     @Override
     public void onPlaylistLongClick(String playlistName) {
         this.currentPlaylistName = playlistName;
-        final CharSequence[] items = {"Renombrar", "Eliminar", "Cambiar Imagen"};
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle(playlistName);
-        builder.setItems(items, (dialog, item) -> {
-            if (items[item].equals("Renombrar")) {
-                showRenamePlaylistDialog(playlistName);
-            } else if (items[item].equals("Eliminar")) {
-                showDeletePlaylistDialog(playlistName);
-            } else if (items[item].equals("Cambiar Imagen")) {
-                openImagePicker();
-            }
-        });
-        builder.show();
+        new AlertDialog.Builder(this)
+                .setTitle(playlistName)
+                .setItems(new String[]{"Renombrar", "Eliminar", "Cambiar Imagen"}, (dialog, item) -> {
+                    if (item == 0) showRenamePlaylistDialog(playlistName);
+                    else if (item == 1) showDeletePlaylistDialog(playlistName);
+                    else if (item == 2) openImagePicker();
+                }).show();
     }
 
     private void openImagePicker() {
@@ -182,38 +185,31 @@ public class PlaylistsActivity extends AppCompatActivity implements PlaylistsAda
         openImageLauncher.launch(intent);
     }
 
-    private void showRenamePlaylistDialog(String oldPlaylistName) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Renombrar Playlist");
-
+    private void showRenamePlaylistDialog(String oldName) {
         final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setText(oldPlaylistName);
-        builder.setView(input);
-
-        builder.setPositiveButton("Renombrar", (dialog, which) -> {
-            String newPlaylistName = input.getText().toString().trim();
-            if (!newPlaylistName.isEmpty() && !newPlaylistName.equals(oldPlaylistName)) {
-                ExecutorService executor = Executors.newSingleThreadExecutor();
-                executor.execute(() -> {
-                    db.cancionDao().renamePlaylist(oldPlaylistName, newPlaylistName);
-                    runOnUiThread(this::loadPlaylists);
-                });
-            }
-        });
-        builder.setNegativeButton("Cancelar", (dialog, which) -> dialog.cancel());
-        builder.show();
+        input.setText(oldName);
+        new AlertDialog.Builder(this)
+                .setTitle("Renombrar")
+                .setView(input)
+                .setPositiveButton("OK", (d, w) -> {
+                    String newName = input.getText().toString().trim();
+                    if (!newName.isEmpty()) {
+                        Executors.newSingleThreadExecutor().execute(() -> {
+                            db.cancionDao().renamePlaylist(oldName, newName);
+                            runOnUiThread(this::loadPlaylists);
+                        });
+                    }
+                }).show();
     }
 
-    private void showDeletePlaylistDialog(String playlistName) {
+    private void showDeletePlaylistDialog(String name) {
         new AlertDialog.Builder(this)
-                .setTitle("Eliminar Playlist")
-                .setMessage("¿Estás seguro de que quieres eliminar la playlist '" + playlistName + "'? Las canciones no se borrarán.")
-                .setPositiveButton("Eliminar", (dialog, which) -> {
-                    ExecutorService executor = Executors.newSingleThreadExecutor();
-                    executor.execute(() -> {
-                        db.cancionDao().deleteDummySongsFromPlaylist(playlistName);
-                        db.cancionDao().renamePlaylist(playlistName, "General");
+                .setTitle("Eliminar")
+                .setMessage("¿Eliminar '" + name + "'? Las canciones no se borrarán.")
+                .setPositiveButton("Eliminar", (d, w) -> {
+                    Executors.newSingleThreadExecutor().execute(() -> {
+                        db.cancionDao().deleteDummySongsFromPlaylist(name);
+                        db.cancionDao().renamePlaylist(name, "General");
                         runOnUiThread(this::loadPlaylists);
                     });
                 })

@@ -4,6 +4,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -19,11 +20,15 @@ import android.widget.Toast;
 
 import com.bumptech.glide.Glide;
 
+import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.util.Date;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -43,31 +48,63 @@ public class ManageSongsActivity extends AppCompatActivity implements SongsAdapt
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_manage_songs);
+        
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            Log.e("ManageSongsActivity", "CRASH DETECTADO", throwable);
+            saveCrashLog(throwable);
+            System.exit(1);
+        });
 
-        // Inicializar el launcher para el selector de imágenes
-        imagePickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(),
-                uri -> {
-                    if (uri != null && currentSongForEdit != null && currentDialogThumbnail != null) {
-                        // Copiar la imagen seleccionada al almacenamiento interno y obtener la nueva ruta
-                        String newThumbnailPath = copyImageToInternalStorage(uri);
-                        if(newThumbnailPath != null) {
-                            currentSongForEdit.thumbnailPath = newThumbnailPath;
-                            // Actualizar la vista previa de la imagen en el diálogo
-                            Glide.with(this).load(new File(newThumbnailPath)).into(currentDialogThumbnail);
+        try {
+            setContentView(R.layout.activity_manage_songs);
+
+            Toolbar toolbar = findViewById(R.id.toolbar_manage);
+            if (toolbar != null) {
+                setSupportActionBar(toolbar);
+                if (getSupportActionBar() != null) {
+                    getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+                    getSupportActionBar().setTitle("Administrar Videos");
+                }
+            }
+            imagePickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(),
+                    uri -> {
+                        if (uri != null && currentSongForEdit != null && currentDialogThumbnail != null) {
+                            // Copiar la imagen seleccionada al almacenamiento interno y obtener la nueva ruta
+                            String newThumbnailPath = copyImageToInternalStorage(uri);
+                            if(newThumbnailPath != null) {
+                                currentSongForEdit.thumbnailPath = newThumbnailPath;
+                                // Actualizar la vista previa de la imagen en el diálogo
+                                Glide.with(this).load(new File(newThumbnailPath)).into(currentDialogThumbnail);
+                            }
                         }
-                    }
-                });
+                    });
 
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            if (getSupportActionBar() != null) {
+                getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            }
+
+            recyclerView = findViewById(R.id.rv_songs);
+            db = AppDatabase.getDatabase(getApplicationContext());
+
+            setupRecyclerView();
+            loadSongs();
+        } catch (Exception e) {
+            Log.e("ManageSongsActivity", "Error en onCreate", e);
+            saveCrashLog(e);
         }
+    }
 
-        recyclerView = findViewById(R.id.rv_songs);
-        db = AppDatabase.getDatabase(getApplicationContext());
-
-        setupRecyclerView();
-        loadSongs();
+    private void saveCrashLog(Throwable throwable) {
+        try {
+            File logFile = new File(getExternalFilesDir(null), "crash_log.txt");
+            try (PrintWriter writer = new PrintWriter(new FileWriter(logFile, true))) {
+                writer.println("--- Crash in ManageSongsActivity at " + new Date() + " ---");
+                throwable.printStackTrace(writer);
+                writer.println("\n");
+            }
+        } catch (Exception e) {
+            Log.e("ManageSongsActivity", "Failed to save crash log", e);
+        }
     }
 
     private void setupRecyclerView() {

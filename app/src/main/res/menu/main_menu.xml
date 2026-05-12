@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_search"
+        android:icon="@android:drawable/ic_menu_search"
+        android:title="Buscar Canción"
+        app:showAsAction="ifRoom" />
+
     <item
         android:id="@+id/action_manage_songs"
         android:title="Administrar Videos"
@@ -8,6 +15,10 @@
     <item
         android:id="@+id/action_playlists"
         android:title="Mis Playlists"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_about"
+        android:title="Acerca de / Legal"
         app:showAsAction="never" />
     <item
         android:id="@+id/media_route_menu_item"

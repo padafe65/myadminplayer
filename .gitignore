@@ -1,6 +1,16 @@
 *.iml
 .gradle
 /local.properties
+
+# Android Signing / Security
+*.jks
+*.keystore
+*.p12
+google-services.json
+
+# App bundles and APKs
+*.apk
+*.aab
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -13,3 +23,13 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Android Signing / Security
+*.jks
+*.keystore
+*.p12
+google-services.json
+
+# App bundles and APKs
+*.apk
+*.aab

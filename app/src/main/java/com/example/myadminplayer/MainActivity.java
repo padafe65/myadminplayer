@@ -7,12 +7,8 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
-import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
@@ -24,21 +20,17 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.text.InputType;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
@@ -56,12 +48,14 @@ import com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import com.google.android.gms.cast.framework.CastButtonFactory;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -70,7 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private ListenableFuture<MediaController> controllerFuture;
     private Player.Listener playerListener;
 
-    Button play_pause, btn_repetir, btnStop, btnAnterior, btnSiguiente, btnRetroceder10s, btnAdelantar10s;
+    Button play_pause, btn_repetir, btnStop, btnAnterior, btnSiguiente, btnRetroceder10s, btnAdelantar10s, btnSpeaker;
     AutoCompleteTextView autoCompleteTextView;
     FloatingActionButton fabAddSong;
     LottieAnimationView animationView;
@@ -79,104 +73,104 @@ public class MainActivity extends AppCompatActivity {
     ImageView videoBackground;
     TextView userWelcomeText;
 
+    private boolean isAudioOnly = false;
     private List<Cancion> currentPlaylist = new ArrayList<>();
     private AppDatabase db;
     private SharedPreferences sharedPreferences;
+    private List<Uri> pendingUris = new ArrayList<>();
 
     private final ActivityResultLauncher<Intent> openFileLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    Uri uri = result.getData().getData();
-                    if (uri != null) {
-                        try {
-                            // Otorgar permiso persistente para que el servidor pueda leer el archivo luego
-                            getContentResolver().takePersistableUriPermission(uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        } catch (SecurityException e) {
-                            e.printStackTrace();
+                    pendingUris.clear();
+                    if (result.getData().getClipData() != null) {
+                        for (int i = 0; i < result.getData().getClipData().getItemCount(); i++) {
+                            pendingUris.add(result.getData().getClipData().getItemAt(i).getUri());
                         }
-                        showAddSongDialog(uri);
+                    } else if (result.getData().getData() != null) {
+                        pendingUris.add(result.getData().getData());
                     }
+                    processNextPendingUri();
                 }
-            });
+            }
+    );
+
+    private boolean isWindows() {
+        String model = android.os.Build.MODEL.toLowerCase();
+        String manufacturer = android.os.Build.MANUFACTURER.toLowerCase();
+        return model.contains("wsa") || manufacturer.contains("subsystem") || model.contains("windows");
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-
-        initializeViews();
-        db = AppDatabase.getDatabase(getApplicationContext());
-        sharedPreferences = getSharedPreferences("MyMusicalPrefs", MODE_PRIVATE);
-
-        updateWelcomeMessage();
-        checkFirstRun();
-    }
-
-    private void checkFirstRun() {
-        boolean isFirstRun = sharedPreferences.getBoolean("isFirstRun", true);
-        if (isFirstRun) {
-            showUserNameDialog();
-        }
-    }
-
-    private void showUserNameDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Bienvenido a MyMusical");
-
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setHint("Ingresa tu nombre");
-        builder.setView(input);
-
-        builder.setPositiveButton("Guardar", (dialog, which) -> {
-            String userName = input.getText().toString();
-            if (!userName.isEmpty()) {
-                sharedPreferences.edit()
-                        .putBoolean("isFirstRun", false)
-                        .putString("userName", userName)
-                        .apply();
-                Toast.makeText(this, "¡Hola, " + userName + "!", Toast.LENGTH_SHORT).show();
-                updateWelcomeMessage();
-            }
+        Log.d("MainActivity", "onCreate: Inicio");
+        
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            Log.e("MainActivity", "CRASH DETECTADO", throwable);
+            saveCrashLog(throwable);
+            System.exit(1);
         });
-        builder.setCancelable(false);
-        builder.show();
-    }
 
-    private void updateWelcomeMessage() {
-        String userName = sharedPreferences.getString("userName", "");
-        if (!userName.isEmpty()) {
-            userWelcomeText.setText("Hola, " + userName);
-        }
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setTitle("MyAdminPlayer");
+        try {
+            setContentView(R.layout.activity_main);
+            Toolbar toolbar = findViewById(R.id.toolbar);
+            if (toolbar != null) setSupportActionBar(toolbar);
+
+            db = AppDatabase.getDatabase(getApplicationContext());
+            sharedPreferences = getSharedPreferences("MyMusicalPrefs", MODE_PRIVATE);
+
+            initializeViews();
+            
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    updateWelcomeMessage();
+                    checkFirstRun();
+                    fixMissingThumbnails();
+                } catch (Exception e) {
+                    Log.e("MainActivity", "Error en tareas diferidas", e);
+                }
+            }, 500);
+            
+            Log.d("MainActivity", "onCreate: Interfaz cargada");
+        } catch (Exception e) {
+            Log.e("MainActivity", "Error en onCreate", e);
+            saveCrashLog(e);
         }
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        if (mediaController != null && mediaController.isConnected()) {
-            handleIntent(intent);
+    public void onConfigurationChanged(@NonNull android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        Log.d("MainActivity", "onConfigurationChanged: Rotación detectada");
+        
+        // Guardamos el estado actual si es necesario antes de cambiar el layout
+        
+        // Aplicamos el nuevo layout (automáticamente elegirá el portrait o landscape)
+        setContentView(R.layout.activity_main);
+        
+        // Re-vinculamos la Toolbar
+        Toolbar toolbar = findViewById(R.id.toolbar);
+        if (toolbar != null) setSupportActionBar(toolbar);
+        
+        // Re-inicializamos todas las vistas y listeners
+        initializeViews();
+        
+        // Re-vinculamos el controlador al nuevo PlayerView
+        if (mediaController != null && playerView != null) {
+            playerView.setPlayer(mediaController);
+            // Si estaba en modo audio-only, lo mantenemos
+            if (isAudioOnly) {
+                if (videoContainer != null) videoContainer.setVisibility(View.GONE);
+                if (btnSpeaker != null) btnSpeaker.setBackgroundResource(android.R.drawable.ic_lock_silent_mode);
+            }
         }
-    }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        initializeMediaController();
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        releaseMediaController();
+        
+        // Refrescamos el adaptador del buscador si tenemos canciones
+        if (!currentPlaylist.isEmpty()) {
+            updateAutoCompleteAdapter(currentPlaylist);
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -189,44 +183,58 @@ public class MainActivity extends AppCompatActivity {
         btnSiguiente = findViewById(R.id.btnSiguiente);
         btnRetroceder10s = findViewById(R.id.btnRetroceder10s);
         btnAdelantar10s = findViewById(R.id.btnAdelantar10s);
+        btnSpeaker = findViewById(R.id.btnSpeaker);
         autoCompleteTextView = findViewById(R.id.autoCompleteTextView);
         fabAddSong = findViewById(R.id.fab_add_song);
-        animationView = findViewById(R.id.animationView);
         menu_canciones = findViewById(R.id.menu_canciones);
         videoContainer = findViewById(R.id.videoContainer);
         videoBackground = findViewById(R.id.videoBackground);
         userWelcomeText = findViewById(R.id.user_welcome_text);
-
-        playerView.setVisibility(View.VISIBLE);
-        fabAddSong.setOnClickListener(v -> openFilePicker());
-
-        autoCompleteTextView.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                autoCompleteTextView.setText("");
+        
+        animationView = findViewById(R.id.animationView);
+        if (animationView != null) {
+            if (isWindows()) {
+                animationView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            } else {
+                animationView.playAnimation();
             }
-            return false;
-        });
+        }
 
-        autoCompleteTextView.setOnItemClickListener((parent, view, position, id) -> {
-            String selection = (String) parent.getItemAtPosition(position);
-            playNewSongFromSelection(selection);
-        });
+        if (fabAddSong != null) fabAddSong.setOnClickListener(v -> openFilePicker());
+        
+        if (autoCompleteTextView != null) {
+            autoCompleteTextView.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_UP) {
+                    autoCompleteTextView.setText("");
+                }
+                return false;
+            });
+
+            autoCompleteTextView.setOnItemClickListener((parent, view, position, id) -> {
+                String selection = (String) parent.getItemAtPosition(position);
+                playNewSongFromSelection(selection);
+            });
+        }
 
         playerListener = new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int playbackState) {
-                if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
-                    playerView.setVisibility(View.INVISIBLE);
-                    videoBackground.setVisibility(View.VISIBLE);
-                } else {
-                    playerView.setVisibility(View.VISIBLE);
-                    videoBackground.setVisibility(View.GONE);
+                if (!isAudioOnly) {
+                    if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                        if (playerView != null) playerView.setVisibility(View.INVISIBLE);
+                        if (videoBackground != null) videoBackground.setVisibility(View.VISIBLE);
+                    } else {
+                        if (playerView != null) playerView.setVisibility(View.VISIBLE);
+                        if (videoBackground != null) videoBackground.setVisibility(View.GONE);
+                    }
                 }
             }
 
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
-                play_pause.setBackgroundResource(isPlaying ? R.drawable.pausa : R.drawable.reproducir);
+                if (play_pause != null) {
+                    play_pause.setBackgroundResource(isPlaying ? R.drawable.pausa : R.drawable.reproducir);
+                }
                 if (isPlaying) {
                     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 } else {
@@ -239,14 +247,16 @@ public class MainActivity extends AppCompatActivity {
                 if (mediaController == null || currentPlaylist.isEmpty()) return;
                 int newIndex = mediaController.getCurrentMediaItemIndex();
                 if (newIndex != -1 && newIndex < currentPlaylist.size()) {
-                    autoCompleteTextView.setText(currentPlaylist.get(newIndex).titulo, false);
+                    if (autoCompleteTextView != null) {
+                        autoCompleteTextView.setText(currentPlaylist.get(newIndex).titulo, false);
+                    }
                 }
             }
 
             @Override
             public void onPlayerError(@NonNull PlaybackException error) {
                 if (error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND) {
-                    Toast.makeText(MainActivity.this, "Archivo no encontrado. Pudo haber sido eliminado.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "Archivo no encontrado.", Toast.LENGTH_LONG).show();
                     int errorPosition = mediaController.getCurrentMediaItemIndex();
                     if (errorPosition != -1 && errorPosition < currentPlaylist.size()) {
                         deleteGhostSong(currentPlaylist.get(errorPosition));
@@ -256,217 +266,280 @@ public class MainActivity extends AppCompatActivity {
         };
     }
 
+    private void saveCrashLog(Throwable throwable) {
+        try {
+            File logFile = new File(getExternalFilesDir(null), "crash_log.txt");
+            try (PrintWriter writer = new PrintWriter(new FileWriter(logFile, true))) {
+                writer.println("--- Crash at " + new Date() + " ---");
+                throwable.printStackTrace(writer);
+                writer.println("\n");
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "Failed to save crash log", e);
+        }
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main_menu, menu);
+        if (!isWindows()) {
+            try {
+                com.google.android.gms.cast.framework.CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), menu, R.id.media_route_menu_item);
+            } catch (Exception e) {
+                Log.e("MainActivity", "Error Cast: " + e.getMessage());
+            }
+        } else {
+            MenuItem castItem = menu.findItem(R.id.media_route_menu_item);
+            if (castItem != null) castItem.setVisible(false);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        int id = item.getItemId();
+        Log.d("MainActivity", "Menu clicado: " + id);
+        try {
+            if (id == R.id.action_search) {
+                showSearchDialog();
+                return true;
+            } else if (id == R.id.action_manage_songs) {
+                Toast.makeText(this, "Abriendo Administrador...", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(this, ManageSongsActivity.class));
+                return true;
+            } else if (id == R.id.action_playlists) {
+                Toast.makeText(this, "Abriendo Playlists...", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(this, PlaylistsActivity.class));
+                return true;
+            } else if (id == R.id.action_about) {
+                showAboutDialog();
+                return true;
+            }
+        } catch (Exception e) {
+            Log.e("MainActivity", "Error al abrir actividad: " + e.getMessage());
+            Toast.makeText(this, "Error al abrir: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
     private void initializeMediaController() {
         SessionToken sessionToken = new SessionToken(this, new ComponentName(this, PlaybackService.class));
         controllerFuture = new MediaController.Builder(this, sessionToken).buildAsync();
         controllerFuture.addListener(() -> {
             try {
                 mediaController = controllerFuture.get();
-                playerView.setPlayer(mediaController);
-                addPlayerListener();
-                handleIntent(getIntent());
+                if (playerView != null) playerView.setPlayer(mediaController);
+                if (mediaController != null) {
+                    mediaController.addListener(playerListener);
+                    handleIntent(getIntent());
+                }
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e("MainActivity", "Error controller", e);
             }
         }, MoreExecutors.directExecutor());
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        initializeMediaController();
+    }
+    
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (mediaController != null) {
+            mediaController.removeListener(playerListener);
+            MediaController.releaseFuture(controllerFuture);
+            mediaController = null;
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (mediaController != null && mediaController.isConnected()) {
+            handleIntent(intent);
+        }
+    }
+
     private void handleIntent(Intent intent) {
         String playlistToPlay = intent.getStringExtra("PLAYLIST_TO_PLAY");
-        String songToPlay = intent.getStringExtra("SONG_TO_PLAY_TITLE");
-
+        String songTitle = intent.getStringExtra("SONG_TO_PLAY_TITLE");
         if (playlistToPlay != null) {
-            loadAndSetPlaylist(playlistToPlay, songToPlay, true);
-        } else if (mediaController.getMediaItemCount() == 0) {
+            loadAndSetPlaylist(playlistToPlay, songTitle, true);
+        } else {
             loadAndSetPlaylist(null, null, false);
         }
-
-        if (intent.hasExtra("PLAYLIST_TO_PLAY")) {
-            setIntent(new Intent());
-        }
     }
 
-    private void playNewSongFromSelection(String selection) {
-        int pos = findPositionByTitle(selection, this.currentPlaylist);
-        if (pos != -1) {
-            mediaController.seekTo(pos, 0);
-            mediaController.play();
-        } else {
-            // Si no está en la lista actual, recargamos todo
-            loadAndSetPlaylist(null, selection, true);
-        }
-
-        InputMethodManager in = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (in != null) {
-            in.hideSoftInputFromWindow(autoCompleteTextView.getWindowToken(), 0);
-        }
-        autoCompleteTextView.clearFocus();
-    }
-
-    private void loadAndSetPlaylist(String playlistName, String songToPlayTitle, boolean shouldPlay) {
-        loadSongsFromDatabase(playlistName, songs -> {
-            this.currentPlaylist = songs;
+    private void loadAndSetPlaylist(String playlist, String songTitleToSeek, boolean autoPlay) {
+        loadSongsFromDatabase(playlist, songs -> {
+            if (songs.isEmpty()) return;
+            currentPlaylist = songs;
             updateAutoCompleteAdapter(songs);
+            
+            List<MediaItem> mediaItems = new ArrayList<>();
+            for (Cancion cancion : songs) {
+                mediaItems.add(new MediaItem.Builder()
+                        .setUri(getUriForSong(cancion))
+                        .setMediaId(cancion.titulo)
+                        .setMediaMetadata(new MediaMetadata.Builder().setTitle(cancion.titulo).build())
+                        .build());
+            }
 
             if (mediaController != null) {
-                List<MediaItem> mediaItems = new ArrayList<>();
-                if (!currentPlaylist.isEmpty()) {
-                    for (Cancion cancion : currentPlaylist) {
-                        MediaMetadata metadata = new MediaMetadata.Builder()
-                                .setTitle(cancion.titulo)
-                                .setArtist("MyAdminPlayer")
-                                .build();
+                mediaController.setMediaItems(mediaItems);
+                mediaController.prepare();
 
-                        mediaItems.add(new MediaItem.Builder()
-                                .setUri(getUriForSong(cancion))
-                                .setMimeType(MimeTypes.VIDEO_MP4)
-                                .setMediaMetadata(metadata)
-                                .build());
+                if (songTitleToSeek != null) {
+                    int index = findPositionByTitle(songTitleToSeek, songs);
+                    if (index != -1) {
+                        mediaController.seekTo(index, 0);
+                        if (autoCompleteTextView != null) {
+                            autoCompleteTextView.setText(songTitleToSeek, false);
+                        }
                     }
                 }
-
-                int startIndex = 0;
-                if (songToPlayTitle != null) {
-                    startIndex = findPositionByTitle(songToPlayTitle, currentPlaylist);
-                }
-                if (startIndex == -1) startIndex = 0;
-
-                mediaController.setMediaItems(mediaItems, startIndex, 0);
-                mediaController.prepare();
-                mediaController.setPlayWhenReady(shouldPlay);
+                
+                if (autoPlay) mediaController.play();
             }
         });
     }
 
-    private void addPlayerListener() {
-        if (mediaController != null && playerListener != null) {
-            mediaController.removeListener(playerListener);
-            mediaController.addListener(playerListener);
+    private void loadSongsFromDatabase(String playlist, SongLoadCallback callback) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            List<Cancion> songs;
+            if (playlist == null || playlist.isEmpty()) {
+                songs = db.cancionDao().getAll();
+            } else {
+                songs = db.cancionDao().getSongsByPlaylist(playlist);
+            }
+            runOnUiThread(() -> callback.onSongsLoaded(songs));
+        });
+    }
+
+    private void updateAutoCompleteAdapter(List<Cancion> songs) {
+        List<String> titles = new ArrayList<>();
+        for (Cancion c : songs) titles.add(c.titulo);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, titles);
+        if (autoCompleteTextView != null) {
+            autoCompleteTextView.setAdapter(adapter);
         }
     }
 
-    private void releaseMediaController() {
-        if (mediaController != null && playerListener != null) {
-            mediaController.removeListener(playerListener);
+    private int findPositionByTitle(String title, List<Cancion> songs) {
+        for (int i = 0; i < songs.size(); i++) {
+            if (songs.get(i).titulo.equalsIgnoreCase(title)) return i;
         }
-        if (controllerFuture != null) {
-            MediaController.releaseFuture(controllerFuture);
-        }
-        mediaController = null;
-        controllerFuture = null;
+        return -1;
+    }
+
+    private Uri getUriForSong(Cancion cancion) {
+        if (cancion.videoUri != null) return Uri.parse(cancion.videoUri);
+        return Uri.parse("android.resource://" + getPackageName() + "/" + cancion.videoResourceId);
+    }
+
+    private interface SongLoadCallback {
+        void onSongsLoaded(List<Cancion> songs);
     }
 
     private void openFilePicker() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("video/*");
-        openFileLauncher.launch(intent);
+        Log.d("MainActivity", "openFilePicker invocado");
+        try {
+            Toast.makeText(this, "Selecciona tus videos", Toast.LENGTH_SHORT).show();
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("video/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            openFileLauncher.launch(intent);
+        } catch (Exception e) {
+            Log.e("MainActivity", "Error en openFilePicker: " + e.getMessage());
+            Toast.makeText(this, "Error al abrir galería: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void processNextPendingUri() {
+        if (pendingUris.isEmpty()) return;
+        Uri uri = pendingUris.remove(0);
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            e.printStackTrace();
+        }
+        showAddSongDialog(uri);
     }
 
     private void showAddSongDialog(Uri uri) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        LayoutInflater inflater = this.getLayoutInflater();
+        LayoutInflater inflater = getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_add_song, null);
         builder.setView(dialogView);
 
+        final ImageView thumbnailView = dialogView.findViewById(R.id.iv_dialog_thumbnail);
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
         final AutoCompleteTextView playlistInput = dialogView.findViewById(R.id.et_playlist_name);
 
-        // Cargar géneros existentes de la base de datos
+        String fileName = "Video_" + System.currentTimeMillis();
+        titleInput.setText(fileName);
+
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
             List<String> playlists = db.cancionDao().getAllPlaylists();
             runOnUiThread(() -> {
                 if (playlists != null && !playlists.isEmpty()) {
-                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                            android.R.layout.simple_dropdown_item_1line, playlists);
+                    ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, playlists);
                     playlistInput.setAdapter(adapter);
-                    // Mostrar sugerencias al tocar el campo
-                    playlistInput.setOnClickListener(v -> playlistInput.showDropDown());
-                    playlistInput.setOnFocusChangeListener((v, hasFocus) -> {
-                        if (hasFocus) playlistInput.showDropDown();
-                    });
                 }
             });
         });
 
-        builder.setTitle("Añadir Video");
+        builder.setTitle("Agregar Video");
         builder.setPositiveButton("Guardar", (dialog, which) -> {
             String title = titleInput.getText().toString();
-            String playlistName = playlistInput.getText().toString();
-
-            if (playlistName.isEmpty()) {
-                playlistName = "General";
-            }
-
-            if (!title.isEmpty()) {
-                String finalPlaylistName = playlistName;
-                executor.execute(() -> {
-                    String thumbnailPath = generateThumbnail(this, uri);
-                    saveNewSong(title, uri.toString(), thumbnailPath, finalPlaylistName);
-                });
-            }
+            String playlist = playlistInput.getText().toString();
+            if (playlist.isEmpty()) playlist = "General";
+            saveNewSong(title, playlist, uri.toString(), generateThumbnail(this, uri));
+            processNextPendingUri();
         });
-        builder.setNegativeButton("Cancelar", (dialog, which) -> dialog.cancel());
+        builder.setNegativeButton("Cancelar", (dialog, which) -> processNextPendingUri());
         builder.show();
     }
 
-    private String generateThumbnail(Context context, Uri videoUri) {
+    private String generateThumbnail(Context context, Uri uri) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
-            retriever.setDataSource(context, videoUri);
-            // Intentar obtener un frame cerca del segundo 1, si falla, el primero disponible
-            Bitmap bitmap = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-            if (bitmap == null) {
-                bitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-            }
-
+            retriever.setDataSource(context, uri);
+            Bitmap bitmap = retriever.getFrameAtTime(1000000);
             if (bitmap != null) {
-                File internal_storage_path = new File(context.getFilesDir(), "thumbnails");
-                if (!internal_storage_path.exists()) {
-                    internal_storage_path.mkdirs();
-                }
-                File file = new File(internal_storage_path, System.currentTimeMillis() + ".jpg");
+                File file = new File(context.getFilesDir(), "thumb_" + System.currentTimeMillis() + ".jpg");
                 try (FileOutputStream out = new FileOutputStream(file)) {
-                    int width = 240;
-                    int height = (int) (bitmap.getHeight() * ((float) width / bitmap.getWidth()));
-                    Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, width, height, false);
-                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out);
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 70, out);
                     return file.getAbsolutePath();
-                } catch (IOException e) {
-                    e.printStackTrace();
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
-            try {
-                retriever.release();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            try { retriever.release(); } catch (IOException ignored) {}
         }
         return null;
     }
 
-    private void saveNewSong(String title, String uriString, String thumbnailPath, String playlist) {
+    private void saveNewSong(String title, String playlist, String uri, String thumb) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
-            Cancion newSong = new Cancion(title, uriString, thumbnailPath, playlist);
-            db.cancionDao().insertSong(newSong);
-            loadSongsFromDatabase(null, songs -> {
-                this.currentPlaylist = songs;
-                updateAutoCompleteAdapter(songs);
-                MediaMetadata metadata = new MediaMetadata.Builder()
-                        .setTitle(newSong.titulo)
-                        .setArtist("MyAdminPlayer")
-                        .build();
-
-                mediaController.addMediaItem(new MediaItem.Builder()
-                        .setUri(getUriForSong(newSong))
-                        .setMimeType(MimeTypes.VIDEO_MP4)
-                        .setMediaMetadata(metadata)
-                        .build());
+            Cancion cancion = new Cancion();
+            cancion.titulo = title;
+            cancion.playlist = playlist;
+            cancion.videoUri = uri;
+            cancion.thumbnailPath = thumb;
+            db.cancionDao().insertSong(cancion);
+            runOnUiThread(() -> {
+                Toast.makeText(this, "Video guardado", Toast.LENGTH_SHORT).show();
+                loadAndSetPlaylist(null, null, false);
             });
         });
     }
@@ -474,205 +547,122 @@ public class MainActivity extends AppCompatActivity {
     private void deleteGhostSong(Cancion cancion) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
-            if (cancion.thumbnailPath != null) {
-                new File(cancion.thumbnailPath).delete();
-            }
             db.cancionDao().deleteSong(cancion);
-            String currentPlaylistName = getIntent().getStringExtra("PLAYLIST_TO_PLAY");
-            runOnUiThread(() -> loadAndSetPlaylist(currentPlaylistName, null, false));
+            runOnUiThread(() -> loadAndSetPlaylist(null, null, false));
         });
     }
 
-    public void Siguiente(View view) {
-        if (mediaController != null && mediaController.hasNextMediaItem()) {
-            mediaController.seekToNextMediaItem();
+    public void Siguiente(View v) { if (mediaController != null) mediaController.seekToNext(); }
+    public void Anterior(View v) { if (mediaController != null) mediaController.seekToPrevious(); }
+    public void PlayPause(View v) { 
+        if (mediaController != null) {
+            if (mediaController.isPlaying()) mediaController.pause();
+            else mediaController.play();
+        }
+    }
+    public void Stop(View v) { if (mediaController != null) mediaController.stop(); }
+    public void Repetir(View v) {
+        if (mediaController == null) return;
+        int nextMode = mediaController.getRepeatMode() == Player.REPEAT_MODE_OFF ? Player.REPEAT_MODE_ONE : Player.REPEAT_MODE_OFF;
+        mediaController.setRepeatMode(nextMode);
+        if (btn_repetir != null) {
+            btn_repetir.setBackgroundResource(nextMode == Player.REPEAT_MODE_ONE ? R.drawable.repetir : R.drawable.no_repetir);
+        }
+    }
+    public void adelantar10s(View v) { if (mediaController != null) mediaController.seekTo(mediaController.getCurrentPosition() + 10000); }
+    public void retroceder10s(View v) { if (mediaController != null) mediaController.seekTo(mediaController.getCurrentPosition() - 10000); }
+    
+    public void toggleAudioOnly(View v) {
+        isAudioOnly = !isAudioOnly;
+        if (videoContainer != null) videoContainer.setVisibility(isAudioOnly ? View.GONE : View.VISIBLE);
+        if (btnSpeaker != null) {
+            btnSpeaker.setBackgroundResource(isAudioOnly ? android.R.drawable.ic_lock_silent_mode : android.R.drawable.ic_lock_silent_mode_off);
         }
     }
 
-    public void Anterior(View view) {
-        if (mediaController != null && mediaController.hasPreviousMediaItem()) {
-            mediaController.seekToPreviousMediaItem();
+    private void showAboutDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Acerca de MyMusical")
+                .setMessage("MyAdminPlayer v1.0\nReproductor multimedia compatible con Windows y Chromecast.")
+                .setPositiveButton("Cerrar", null)
+                .show();
+    }
+
+    private void updateWelcomeMessage() {
+        String userName = sharedPreferences.getString("userName", "Usuario");
+        if (userWelcomeText != null) {
+            userWelcomeText.setText("Hola, " + userName);
         }
     }
 
-    public void PlayPause(View view) {
-        if (mediaController == null || mediaController.getMediaItemCount() == 0) {
-            Toast.makeText(this, "Selecciona una canción", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (mediaController.isPlaying()) {
-            mediaController.pause();
-        } else {
+    private void checkFirstRun() {
+        if (sharedPreferences.getBoolean("isFirstRun", true)) showUserNameDialog();
+    }
+
+    private void showUserNameDialog() {
+        final EditText input = new EditText(this);
+        new AlertDialog.Builder(this)
+                .setTitle("Bienvenido")
+                .setMessage("¿Cómo te llamas?")
+                .setView(input)
+                .setPositiveButton("Guardar", (dialog, which) -> {
+                    String name = input.getText().toString();
+                    sharedPreferences.edit().putBoolean("isFirstRun", false).putString("userName", name).apply();
+                    updateWelcomeMessage();
+                })
+                .setCancelable(false)
+                .show();
+    }
+
+    private void showSearchDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Seleccionar Canción");
+
+        // Inflar un layout que contenga el TextInputLayout y AutoCompleteTextView
+        View view = getLayoutInflater().inflate(R.layout.dialog_search_song, null);
+        final AutoCompleteTextView dialogSearch = view.findViewById(R.id.dialog_autoCompleteTextView);
+        
+        // Copiar los títulos de la lista actual
+        List<String> titles = new ArrayList<>();
+        for (Cancion c : currentPlaylist) titles.add(c.titulo);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, titles);
+        dialogSearch.setAdapter(adapter);
+
+        builder.setView(view);
+        final AlertDialog dialog = builder.create();
+
+        // Al hacer clic en una sugerencia, reproducir y cerrar el diálogo
+        dialogSearch.setOnItemClickListener((parent, view1, position, id) -> {
+            String selection = (String) parent.getItemAtPosition(position);
+            playNewSongFromSelection(selection);
+            dialog.dismiss();
+        });
+
+        // Hacer que el teclado aparezca automáticamente y mostrar la lista al tocar
+        dialogSearch.setOnClickListener(v -> dialogSearch.showDropDown());
+
+        dialog.show();
+    }
+
+    private void playNewSongFromSelection(String selection) {
+        int index = findPositionByTitle(selection, currentPlaylist);
+        if (index != -1 && mediaController != null) {
+            mediaController.seekTo(index, 0);
             mediaController.play();
         }
     }
-
-    public void Stop(View view) {
-        if (mediaController != null) {
-            mediaController.stop();
-        }
-        autoCompleteTextView.setText("", false);
-        Toast.makeText(this, "Reproducción detenida", Toast.LENGTH_SHORT).show();
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.main_menu, menu);
-        // Vincula el botón del XML con el sistema de búsqueda de dispositivos (Smart TV/Chromecast)
-        CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), menu, R.id.media_route_menu_item);
-        return true;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
-        int itemId = item.getItemId();
-        if (itemId == R.id.action_manage_songs) {
-            startActivity(new Intent(this, ManageSongsActivity.class));
-            return true;
-        } else if (itemId == R.id.action_playlists) {
-            startActivity(new Intent(this, PlaylistsActivity.class));
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    public void Repetir(View view) {
-        if (mediaController == null) return;
-        int newMode = mediaController.getRepeatMode() == Player.REPEAT_MODE_ONE ? Player.REPEAT_MODE_OFF : Player.REPEAT_MODE_ONE;
-        mediaController.setRepeatMode(newMode);
-        btn_repetir.setBackgroundResource(newMode == Player.REPEAT_MODE_ONE ? R.drawable.repetir : R.drawable.no_repetir);
-        Toast.makeText(this, newMode == Player.REPEAT_MODE_ONE ? "Repetir activado" : "Repetir desactivado", Toast.LENGTH_SHORT).show();
-    }
-
-    public void adelantar10s(View view) {
-        if (mediaController != null) mediaController.seekForward();
-    }
-
-    public void retroceder10s(View view) {
-        if (mediaController != null) mediaController.seekBack();
-    }
-
-    @Override
-    public void onConfigurationChanged(@NonNull Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            enterFullScreen();
-        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT) {
-            exitFullScreen();
-        }
-    }
-
-    private void enterFullScreen() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-        hideSystemUI();
-        findViewById(R.id.toolbar).setVisibility(View.GONE);
-        menu_canciones.setVisibility(View.GONE);
-        animationView.setVisibility(View.GONE);
-        btnAnterior.setVisibility(View.GONE);
-        btnSiguiente.setVisibility(View.GONE);
-        play_pause.setVisibility(View.GONE);
-        btnStop.setVisibility(View.GONE);
-        btn_repetir.setVisibility(View.GONE);
-        btnRetroceder10s.setVisibility(View.GONE);
-        btnAdelantar10s.setVisibility(View.GONE);
-        fabAddSong.setVisibility(View.GONE);
-        ViewGroup.LayoutParams params = videoContainer.getLayoutParams();
-        params.height = ViewGroup.LayoutParams.MATCH_PARENT;
-        videoContainer.setLayoutParams(params);
-    }
-
-    private void exitFullScreen() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
-        }
-        showSystemUI();
-        videoBackground.setVisibility(View.VISIBLE);
-        findViewById(R.id.toolbar).setVisibility(View.VISIBLE);
-        menu_canciones.setVisibility(View.VISIBLE);
-        animationView.setVisibility(View.VISIBLE);
-        btnAnterior.setVisibility(View.VISIBLE);
-        btnSiguiente.setVisibility(View.VISIBLE);
-        play_pause.setVisibility(View.VISIBLE);
-        btnStop.setVisibility(View.VISIBLE);
-        btn_repetir.setVisibility(View.VISIBLE);
-        btnRetroceder10s.setVisibility(View.VISIBLE);
-        btnAdelantar10s.setVisibility(View.VISIBLE);
-        fabAddSong.setVisibility(View.VISIBLE);
-        ViewGroup.LayoutParams params = videoContainer.getLayoutParams();
-        params.height = (int) (250 * getResources().getDisplayMetrics().density);
-        videoContainer.setLayoutParams(params);
-    }
-
-    private void hideSystemUI() {
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), playerView);
-        controller.hide(WindowInsetsCompat.Type.systemBars());
-        controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-    }
-
-    private void showSystemUI() {
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-        WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), playerView);
-        controller.show(WindowInsetsCompat.Type.systemBars());
-    }
-
-    interface SongLoadCallback {
-        void onSongsLoaded(List<Cancion> songs);
-    }
-
-    private void loadSongsFromDatabase(String playlistName, SongLoadCallback callback) {
+    
+    private void fixMissingThumbnails() {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
-            List<Cancion> loadedSongs;
-            if (playlistName != null) {
-                loadedSongs = db.cancionDao().getSongsByPlaylist(playlistName);
-            } else {
-                if (db.cancionDao().count() == 0) {
-                    db.cancionDao().insertAll(getInitialSongs());
+            if (db == null) return;
+            List<Cancion> allSongs = db.cancionDao().getAll();
+            for (Cancion c : allSongs) {
+                if (c.videoUri != null && (c.thumbnailPath == null || !new File(c.thumbnailPath).exists())) {
+                    c.thumbnailPath = generateThumbnail(this, Uri.parse(c.videoUri));
+                    db.cancionDao().updateSong(c);
                 }
-                loadedSongs = db.cancionDao().getAll();
-            }
-            if (callback != null) {
-                runOnUiThread(() -> callback.onSongsLoaded(loadedSongs));
             }
         });
-    }
-
-    private void updateAutoCompleteAdapter(List<Cancion> songs) {
-        List<String> titulos = new ArrayList<>();
-        for (Cancion cancion : songs) {
-            titulos.add(cancion.titulo);
-        }
-        ArrayAdapter<String> autoCompleteAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, titulos);
-        autoCompleteTextView.setAdapter(autoCompleteAdapter);
-    }
-
-    private int findPositionByTitle(String title, List<Cancion> listToSearch) {
-        for (int i = 0; i < listToSearch.size(); i++) {
-            if (listToSearch.get(i).titulo.equals(title)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private List<Cancion> getInitialSongs() {
-        List<Cancion> songs = new ArrayList<>();
-        String[] opciones = {"Nodal_botella", "Arelis_pasado", "Cari Leon_tu", "Gaga_shallow", "Kany_confieso", "Ricardo_fuiste_tu", "Angela_Llorona", "Antonio_HijoDesobediente", "Lupe y Polo_Con llorar nada remedio", "Binomio de oro_Un recuerdo que mata", "Lupe y Polo dos pasajes", "Los balcanes Le hace falta un beso", "Vicente_Hermoso cariño", "Enrique_Por Amarte", "Marcos Barrientos_Dios incomparable", "Pepe Aguilar_Por muejeres como tú", "Aline Barrios_Resucitame"};
-        int[] videosRaw = {R.raw.christiannodal_botellatrasbotella, R.raw.arelyshenaolopasadopisado, R.raw.carinleontu, R.raw.shallow, R.raw.kanygarcia_confieso, R.raw.ricardoarjonafuistetu, R.raw.angela_aguilarlallorona, R.raw.el_hijodesobediente, R.raw.conllorarnadaremedio, R.raw.unrecuerdoquemata, R.raw.dospasajes, R.raw.lehacefaltaunbeso, R.raw.hermosocarino, R.raw.poramarte, R.raw.diosincomparable, R.raw.pormujerescomotu, R.raw.resucitame};
-        for (int i = 0; i < opciones.length; i++) {
-            songs.add(new Cancion(opciones[i], videosRaw[i]));
-        }
-        return songs;
-    }
-
-    private Uri getUriForSong(Cancion cancion) {
-        if (cancion.videoUri != null) {
-            return Uri.parse(cancion.videoUri);
-        } else {
-            return Uri.parse("android.resource://" + getPackageName() + "/" + cancion.videoResourceId);
-        }
     }
 }

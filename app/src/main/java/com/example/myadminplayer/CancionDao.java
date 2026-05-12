@@ -38,6 +38,9 @@ public interface CancionDao {
     @Query("UPDATE canciones SET playlist_image_uri = :imageUri WHERE playlist = :playlistName")
     void updatePlaylistImage(String playlistName, String imageUri);
 
+    @Query("SELECT * FROM canciones WHERE titulo = :title AND playlist = :playlistName LIMIT 1")
+    Cancion getSongByTitleAndPlaylist(String title, String playlistName);
+
     @Query("SELECT DISTINCT playlist FROM canciones WHERE playlist IS NOT NULL AND playlist != ''")
     List<String> getAllPlaylists();
 

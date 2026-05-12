@@ -7,13 +7,13 @@
     android:background="@drawable/background"
     tools:context=".MainActivity">
 
-    <!-- 1. Añadimos una Toolbar real -->
     <androidx.appcompat.widget.Toolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/byzantium"
         android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
+        app:popupTheme="@style/ThemeOverlay.AppCompat.Light"
         app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
@@ -28,7 +28,16 @@
         app:layout_constraintTop_toBottomOf="@+id/toolbar"
         tools:text="Hola, Usuario" />
 
-    <!-- 2. El TextView del título ya no es necesario, lo hemos quitado -->
+    <Button
+        android:id="@+id/btnSpeaker"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="16dp"
+        android:background="@android:drawable/ic_lock_silent_mode_off"
+        android:onClick="toggleAudioOnly"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/toolbar" />
 
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/menu_canciones"
@@ -40,7 +49,7 @@
         android:textColorHint="#CCCCCC"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/user_welcome_text"> <!-- 3. Lo anclamos al nuevo TextView -->
+        app:layout_constraintTop_toBottomOf="@+id/user_welcome_text">
 
         <AutoCompleteTextView
             android:id="@+id/autoCompleteTextView"
@@ -53,8 +62,9 @@
     <FrameLayout
         android:id="@+id/videoContainer"
         android:layout_width="0dp"
-        android:layout_height="250dp"
+        android:layout_height="0dp"
         android:layout_marginTop="8dp"
+        app:layout_constraintDimensionRatio="H,16:9"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/menu_canciones">
@@ -63,7 +73,6 @@
             android:id="@+id/videoBackground"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:contentDescription="@string/etx_titulo"
             android:scaleType="centerCrop"
             android:src="@drawable/music" />
 
@@ -71,7 +80,8 @@
             android:id="@+id/player_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_gravity="center" />
+            android:layout_gravity="center"
+            app:resize_mode="fit" />
 
     </FrameLayout>
 
@@ -83,7 +93,7 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/videoContainer"
-        app:lottie_autoPlay="true"
+        app:lottie_autoPlay="false"
         app:lottie_loop="true"
         app:lottie_rawRes="@raw/animation_lmli8bet" />
 
