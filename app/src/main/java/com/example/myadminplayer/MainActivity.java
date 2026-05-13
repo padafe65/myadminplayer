@@ -450,14 +450,22 @@ public class MainActivity extends AppCompatActivity {
         Log.d("MainActivity", "openFilePicker invocado");
         try {
             Toast.makeText(this, "Selecciona tus videos", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            Intent intent;
+            if (isWindows()) {
+                // Modo PC: Usar el selector de documentos para navegar por discos reales (C:, etc.)
+                intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+            } else {
+                // Modo Celular: Usar el selector de contenido estándar para Galería
+                intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+            }
             intent.setType("video/*");
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); // Permitir selección múltiple en ambos
             openFileLauncher.launch(intent);
         } catch (Exception e) {
             Log.e("MainActivity", "Error en openFilePicker: " + e.getMessage());
-            Toast.makeText(this, "Error al abrir galería: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Error al abrir: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -531,6 +539,13 @@ public class MainActivity extends AppCompatActivity {
     private void saveNewSong(String title, String playlist, String uri, String thumb) {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
+            // Validar si la canción ya existe en esa playlist
+            Cancion existing = db.cancionDao().getSongByTitleAndPlaylist(title, playlist);
+            if (existing != null) {
+                runOnUiThread(() -> Toast.makeText(this, "El video '" + title + "' ya existe en esta playlist", Toast.LENGTH_SHORT).show());
+                return;
+            }
+
             Cancion cancion = new Cancion();
             cancion.titulo = title;
             cancion.playlist = playlist;
