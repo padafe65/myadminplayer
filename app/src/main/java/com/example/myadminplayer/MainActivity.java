@@ -11,6 +11,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import androidx.media3.ui.PlayerView;
@@ -78,6 +79,10 @@ public class MainActivity extends AppCompatActivity {
     private AppDatabase db;
     private SharedPreferences sharedPreferences;
     private List<Uri> pendingUris = new ArrayList<>();
+    private int totalPendingCount = 0;
+    private int currentPendingIndex = 0;
+    private String activePlaylistName = null; // Track current loaded playlist scope
+    private boolean hasAutoLoadedNext = false; // Evitar bucles infinitos de carga automática
 
     private final ActivityResultLauncher<Intent> openFileLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -91,6 +96,8 @@ public class MainActivity extends AppCompatActivity {
                     } else if (result.getData().getData() != null) {
                         pendingUris.add(result.getData().getData());
                     }
+                    totalPendingCount = pendingUris.size();
+                    currentPendingIndex = 1;
                     processNextPendingUri();
                 }
             }
@@ -223,6 +230,11 @@ public class MainActivity extends AppCompatActivity {
                     if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
                         if (playerView != null) playerView.setVisibility(View.INVISIBLE);
                         if (videoBackground != null) videoBackground.setVisibility(View.VISIBLE);
+                        
+                        // Si la lista terminó y no hemos cargado extras aún
+                        if (playbackState == Player.STATE_ENDED && !hasAutoLoadedNext && activePlaylistName != null) {
+                            loadExtraSongsFromOtherPlaylist();
+                        }
                     } else {
                         if (playerView != null) playerView.setVisibility(View.VISIBLE);
                         if (videoBackground != null) videoBackground.setVisibility(View.GONE);
@@ -251,6 +263,13 @@ public class MainActivity extends AppCompatActivity {
                         autoCompleteTextView.setText(currentPlaylist.get(newIndex).titulo, false);
                     }
                 }
+            }
+
+            @Override
+            public void onTracksChanged(@NonNull Tracks tracks) {
+                // Eliminamos el refresco automático de aquí para evitar el bucle infinito detectado en los logs.
+                // El PlaybackService ya se encarga de cambiar la lista cuando detecta la TV.
+                Log.d("DEBUG_REPRODUCTOR", "onTracksChanged: Cambio detectado (sin refresco automático para evitar bucle)");
             }
 
             @Override
@@ -375,6 +394,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadAndSetPlaylist(String playlist, String songTitleToSeek, boolean autoPlay) {
+        this.activePlaylistName = playlist;
+        this.hasAutoLoadedNext = false; // Resetear cuando el usuario elige una lista manualmente
         loadSongsFromDatabase(playlist, songs -> {
             if (songs.isEmpty()) return;
             currentPlaylist = songs;
@@ -382,16 +403,43 @@ public class MainActivity extends AppCompatActivity {
             
             List<MediaItem> mediaItems = new ArrayList<>();
             for (Cancion cancion : songs) {
+                Uri songUri = getUriForSong(cancion);
+                String mimeType = "video/mp4"; // Default
+                try {
+                    String type = getContentResolver().getType(songUri);
+                    if (type != null) mimeType = type;
+                } catch (Exception ignored) {}
+
                 mediaItems.add(new MediaItem.Builder()
-                        .setUri(getUriForSong(cancion))
+                        .setUri(songUri)
+                        .setMimeType(mimeType) // CRÍTICO: El MIME type es obligatorio para Cast
                         .setMediaId(cancion.titulo)
                         .setMediaMetadata(new MediaMetadata.Builder().setTitle(cancion.titulo).build())
                         .build());
             }
 
             if (mediaController != null) {
-                mediaController.setMediaItems(mediaItems);
-                mediaController.prepare();
+                Log.d("DEBUG_REPRODUCTOR", "Actualizando lista de reproducción. Items: " + mediaItems.size());
+                // Verificamos si la lista es idéntica para no recargar innecesariamente
+                boolean isSameList = false;
+                if (mediaController.getMediaItemCount() == mediaItems.size()) {
+                    isSameList = true;
+                    for (int i = 0; i < mediaItems.size(); i++) {
+                        if (!mediaItems.get(i).mediaId.equals(mediaController.getMediaItemAt(i).mediaId)) {
+                            isSameList = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (!isSameList) {
+                    boolean hasItems = mediaController.getMediaItemCount() > 0;
+                    mediaController.setMediaItems(mediaItems, /* resetPosition= */ !hasItems);
+                    
+                    if (mediaController.getPlaybackState() == Player.STATE_IDLE || mediaController.getPlaybackState() == Player.STATE_ENDED) {
+                        mediaController.prepare();
+                    }
+                }
 
                 if (songTitleToSeek != null) {
                     int index = findPositionByTitle(songTitleToSeek, songs);
@@ -403,8 +451,60 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 
-                if (autoPlay) mediaController.play();
+                if (autoPlay || mediaController.getPlayWhenReady()) {
+                    mediaController.play();
+                }
             }
+        });
+    }
+
+    private void loadExtraSongsFromOtherPlaylist() {
+        hasAutoLoadedNext = true; // Solo lo hacemos una vez por sesión de reproducción
+        Log.d("DEBUG_REPRODUCTOR", "Playlist finalizada. Buscando sugerencias de otras listas...");
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            List<String> allPlaylists = db.cancionDao().getAllPlaylists();
+            if (allPlaylists == null || allPlaylists.size() <= 1) return;
+
+            // Elegir una lista distinta a la actual al azar
+            allPlaylists.remove(activePlaylistName);
+            String randomPlaylist = allPlaylists.get(new java.util.Random().nextInt(allPlaylists.size()));
+
+            List<Cancion> extraSongs = db.cancionDao().getSongsByPlaylist(randomPlaylist);
+            if (extraSongs.isEmpty()) return;
+
+            // Tomar máximo 3 canciones al azar de esa lista
+            java.util.Collections.shuffle(extraSongs);
+            int countToTake = Math.min(3, extraSongs.size());
+            List<Cancion> selectedExtras = extraSongs.subList(0, countToTake);
+
+            runOnUiThread(() -> {
+                if (mediaController != null) {
+                    List<MediaItem> extraItems = new ArrayList<>();
+                    for (Cancion cancion : selectedExtras) {
+                        Uri uri = getUriForSong(cancion);
+                        String mimeType = "video/mp4";
+                        try {
+                            String type = getContentResolver().getType(uri);
+                            if (type != null) mimeType = type;
+                        } catch (Exception ignored) {}
+
+                        extraItems.add(new MediaItem.Builder()
+                                .setUri(uri)
+                                .setMimeType(mimeType)
+                                .setMediaId(cancion.titulo)
+                                .setMediaMetadata(new MediaMetadata.Builder().setTitle(cancion.titulo).build())
+                                .build());
+                    }
+
+                    Log.d("DEBUG_REPRODUCTOR", "Agregando " + extraItems.size() + " videos sugeridos de la lista: " + randomPlaylist);
+                    mediaController.addMediaItems(extraItems);
+                    mediaController.play();
+                    
+                    Toast.makeText(this, "Reproduciendo sugerencias de: " + randomPlaylist, Toast.LENGTH_LONG).show();
+                }
+            });
         });
     }
 
@@ -470,7 +570,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void processNextPendingUri() {
-        if (pendingUris.isEmpty()) return;
+        if (pendingUris.isEmpty()) {
+            totalPendingCount = 0;
+            currentPendingIndex = 0;
+            return;
+        }
         Uri uri = pendingUris.remove(0);
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -478,6 +582,7 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
         showAddSongDialog(uri);
+        currentPendingIndex++;
     }
 
     private void showAddSongDialog(Uri uri) {
@@ -490,8 +595,11 @@ public class MainActivity extends AppCompatActivity {
         final EditText titleInput = dialogView.findViewById(R.id.et_song_title);
         final AutoCompleteTextView playlistInput = dialogView.findViewById(R.id.et_playlist_name);
 
-        String fileName = "Video_" + System.currentTimeMillis();
-        titleInput.setText(fileName);
+        // Sugerir un nombre relativo a la selección actual (Video 1, Video 2...)
+        String suggestedName = "Video " + currentPendingIndex;
+        titleInput.setText(suggestedName);
+        titleInput.selectAll();
+        titleInput.requestFocus();
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
@@ -554,7 +662,10 @@ public class MainActivity extends AppCompatActivity {
             db.cancionDao().insertSong(cancion);
             runOnUiThread(() -> {
                 Toast.makeText(this, "Video guardado", Toast.LENGTH_SHORT).show();
-                loadAndSetPlaylist(null, null, false);
+                // Solo recargamos la lista si ya procesamos todos los videos seleccionados
+                if (pendingUris.isEmpty()) {
+                    loadAndSetPlaylist(activePlaylistName, null, false);
+                }
             });
         });
     }
@@ -661,6 +772,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void playNewSongFromSelection(String selection) {
         int index = findPositionByTitle(selection, currentPlaylist);
+        Log.d("DEBUG_REPRODUCTOR", "Seleccionado: " + selection + " (Indice: " + index + ")");
         if (index != -1 && mediaController != null) {
             mediaController.seekTo(index, 0);
             mediaController.play();
